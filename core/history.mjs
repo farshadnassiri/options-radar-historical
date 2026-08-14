@@ -92,6 +92,11 @@ function passesLiquidity(row, minVolume = 0, minValue = 0) {
   return m.volume >= Math.max(0, num(minVolume)) && m.value >= Math.max(0, num(minValue));
 }
 
+function readableHistoryName(entity, fallback) {
+  const name = String(entity?.name || '').trim();
+  return name && name !== String(entity?.ins || '') ? name : fallback;
+}
+
 export function flattenActiveContracts(ua) {
   const out = [];
   for (const ex of ua?.expiryList || []) {
@@ -100,7 +105,7 @@ export function flattenActiveContracts(ua) {
         const q = st[kind];
         if (!q?.ins) continue;
         out.push({
-          ins: String(q.ins), name: q.name || String(q.ins), kind,
+          ins: String(q.ins), name: readableHistoryName(q, `قرارداد ${kind === 'call' ? 'اختیار خرید' : 'اختیار فروش'}`), kind,
           strike: st.strike, size: st.size || 1000,
           expiry: normalizeHistoryDate(ex.endDate), expiryRaw: ex.endDate,
           daysNow: ex.days,
@@ -499,16 +504,34 @@ export function entrySensitivity(args, shocks = [-10, -5, 0, 5, 10]) {
   return out;
 }
 
-/** ماتریس ورودهای پیاپی برای یک ترکیب؛ هر خانه نتیجه ورود i و آفست j است. */
+/** ماتریس ورود×خروج برای یک ترکیب؛ هر خانه نتیجه ورود i و آفست j است. */
 export function rollingEntryMatrix(args) {
   const baseRows = [...new Set((args.seriesByIns?.[String(args.baseIns)] || [])
     .map((r) => normalizeHistoryDate(r.date))
     .filter((d) => d >= normalizeHistoryDate(args.startDate) && d <= normalizeHistoryDate(args.endDate))
     .sort((a, b) => a - b))];
   const cells = [];
+  const entries = [];
   for (let i = 0; i < baseRows.length; i++) {
     const replay = replayHistory({ ...args, startDate: baseRows[i], manualEntry: {} });
     if (!replay.ok) continue;
+    entries.push({
+      entryDate: baseRows[i],
+      gross: replay.entry?.gross, fee: replay.entry?.fee, netCash: replay.entry?.netCash,
+      cashPaid: replay.entry?.cashPaid, cashReceived: replay.entry?.cashReceived,
+      cashNetGross: replay.entry?.cashNetGross,
+      capital: replay.entry?.capital?.value, capitalLabel: replay.entry?.capital?.label,
+      margin: replay.entry?.margin?.margin, marginNet: replay.entry?.margin?.marginNet,
+      conditionalMargin: replay.entry?.margin?.conditionalMargin,
+      baseMarket: replay.entry?.baseMarket,
+      legs: replay.priced.map((leg) => ({
+        name: readableHistoryName(leg, `پای ${leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه'}`),
+        kind: leg.kind, side: leg.side, strike: leg.strike, expiry: leg.expiry,
+        size: leg.size, ratio: leg.ratio, entryPrice: leg.price,
+        entryVolume: leg.entryVolume, entryTrades: leg.entryTrades,
+        entryValue: leg.entryValue, entryValueEstimated: leg.entryValueEstimated,
+      })),
+    });
     for (let rowIndex = 0; rowIndex < replay.rows.length; rowIndex++) {
       const row = replay.rows[rowIndex];
       if (row.date < baseRows[i] || row.status !== 'ok') continue;
@@ -522,10 +545,26 @@ export function rollingEntryMatrix(args) {
         holdingTradingDays: rowIndex,
         holdingCalendarDays: row.holdingDays,
         baseReturnPct: row.baseCumulativePct,
+        baseClose: row.baseClose, baseDailyPct: row.baseDailyPct,
+        baseVolume: row.baseVolume, baseTrades: row.baseTrades,
+        baseValue: row.baseValue, baseValueEstimated: row.baseValueEstimated,
+        grossPnl: row.grossPnl, entryFee: row.entryFee, exitFee: row.exitFee,
+        totalFees: row.totalFees, drawdown: row.drawdown,
+        margin: row.margin, marginNet: row.marginNet,
+        conditionalMargin: row.conditionalMargin,
+        perLeg: row.perLeg.map((leg) => ({
+          name: readableHistoryName(leg, `پای ${leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه'}`),
+          kind: leg.kind, side: leg.side, strike: leg.strike,
+          entryPrice: leg.entryPrice, exitPrice: leg.exitPrice,
+          grossPnl: leg.grossPnl, netPnl: leg.netPnl, pnlDelta: leg.pnlDelta,
+          entryFee: leg.entryFee, exitFee: leg.exitFee,
+          volume: leg.volume, trades: leg.trades,
+          value: leg.value, valueEstimated: leg.valueEstimated,
+        })),
       });
     }
   }
-  return { dates: baseRows, cells };
+  return { dates: baseRows, cells, entries };
 }
 
 /**

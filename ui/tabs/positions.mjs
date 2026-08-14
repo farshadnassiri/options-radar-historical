@@ -18,6 +18,11 @@ const KINDS = [
   ['long-put', 'خرید پوت'],
 ];
 
+const displayName = (name, identifier, fallback) => {
+  const text = String(name || '').trim();
+  return text && text !== String(identifier || '') ? text : fallback;
+};
+
 export async function mount(root, { state, api }) {
   const s = () => state.settings;
   let positions = [];
@@ -83,7 +88,7 @@ export async function mount(root, { state, api }) {
   function refreshUaOptions() {
     const cur = F.ua.value;
     F.ua.innerHTML = '<option value="">— انتخاب کن —</option>'
-      + uaList.map((u) => `<option value="${u.ins}" ${u.ins === cur ? 'selected' : ''}>${u.name || u.ins}</option>`).join('');
+      + uaList.map((u) => `<option value="${u.ins}" ${u.ins === cur ? 'selected' : ''}>${displayName(u.name, u.ins, 'دارایی پایه بدون نام')}</option>`).join('');
   }
 
   let detail = null;
@@ -109,7 +114,7 @@ export async function mount(root, { state, api }) {
     F.opt.innerHTML = ex.strikes.map((st) => {
       const q = put ? st.put : st.call;
       return `<option value="${q.ins}" data-strike="${st.strike}" data-size="${st.size}" data-days="${ex.days}" data-bid="${q.bid}" data-ask="${q.ask}" data-close="${q.close}">
-        ${q.name || q.ins} — اعمال ${fmt.money(st.strike)} — تقاضا ${fmt.money(q.bid)}</option>`;
+        ${displayName(q.name, q.ins, 'قرارداد اختیار بدون نام')} — اعمال ${fmt.money(st.strike)} — تقاضا ${fmt.money(q.bid)}</option>`;
     }).join('');
     const first = F.opt.selectedOptions[0];
     if (first) F.oPrice.value = Math.round(Number(first.dataset.bid) || Number(first.dataset.close) || 0);
@@ -204,7 +209,7 @@ export async function mount(root, { state, api }) {
     const rows = evals.map(({ p, m }, i) => `
       <tr data-i="${i}" style="cursor:pointer" tabindex="0" role="button" aria-label="جزئیات موقعیت ${p.title || '—'}">
         <td>${p.title || '—'}</td>
-        <td>${p.uaName || p.uaIns}</td>
+        <td>${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}</td>
         <td>${p.legs.map((l) => `${l.side === 'sell' ? '−' : '+'}${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت') + ' ' + fmt.money(l.strike)}`).join(' ')}</td>
         <td class="n">${fmt.int(p.qty)}</td>
         <td class="n">${p.entryDate ? faDigits(p.entryDate) : '—'}</td>
@@ -288,7 +293,7 @@ export async function mount(root, { state, api }) {
     const sameRow = chartFor === expanded;
     if (chart) chartRange = chart.view();
     root.querySelector('#det-card').style.display = '';
-    root.querySelector('#det-title').textContent = `${p.title} — ${p.uaName || p.uaIns}`;
+    root.querySelector('#det-title').textContent = `${p.title} — ${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}`;
 
     const legRows = m.perLeg.map((l) => `
       <tr>

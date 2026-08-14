@@ -14,6 +14,11 @@ import { fmt } from '/ui/table.mjs';
 import { faDigits, signTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 
+const baseName = (position) => {
+  const name = String(position?.uaName || '').trim();
+  return name && name !== String(position?.uaIns || '') ? name : 'دارایی پایه بدون نام';
+};
+
 export async function mount(root, { state, api }) {
   const s = () => state.settings;
   let positions = [];
@@ -92,7 +97,7 @@ export async function mount(root, { state, api }) {
     try { positions = await (await fetch('/api/positions')).json(); }
     catch { positions = []; }
     el('#pos').innerHTML = positions.length
-      ? positions.map((p, i) => `<option value="${i}">${p.title || 'موقعیت'} — ${p.uaName || p.uaIns}</option>`).join('')
+      ? positions.map((p, i) => `<option value="${i}">${p.title || 'موقعیت'} — ${baseName(p)}</option>`).join('')
       : '<option value="">موقعیتی ثبت نشده</option>';
     if (!positions.length) {
       el('#kpis').innerHTML = `<div class="kpi"><div class="k">موقعیت</div><div class="v">—</div>
@@ -212,7 +217,7 @@ export async function mount(root, { state, api }) {
     const m = markToMarket(p, quotes, { fees, spot, spotClose: uaQ.close || spot });
 
     el('#cur').innerHTML = `
-      <dt>پایه</dt><dd>${p.uaName || p.uaIns}</dd>
+      <dt>پایه</dt><dd>${baseName(p)}</dd>
       <dt>قیمت پایه</dt><dd>${fmt.money(spot)}</dd>
       <dt>تعداد قرارداد</dt><dd>${fmt.int(p.qty)}</dd>
       <dt>سود و زیان جاری</dt><dd>${fmt.money(m.pnlTotal)}</dd>

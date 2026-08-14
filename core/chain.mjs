@@ -61,13 +61,15 @@ export const UNKNOWN_DEPTH = 1e12;
 
 /** مظنه یک سمت قرارداد، از رکورد دیده‌بان. */
 function sideQuote(r, sfx) {
+  const ins = String(r[`insCode_${sfx}`] ?? '');
+  const rawName = String(r[`lVal18AFC_${sfx}`] ?? '').trim();
   const bid = n(r[`pMeDem_${sfx}`]);
   const ask = n(r[`pMeOf_${sfx}`]);
   const last = n(r[`pDrCotVal_${sfx}`]);
   const close = n(r[`pClosing_${sfx}`]) || last || bid;
   return {
-    ins: String(r[`insCode_${sfx}`] ?? ''),
-    name: String(r[`lVal18AFC_${sfx}`] ?? ''),
+    ins,
+    name: rawName && rawName !== ins ? rawName : `قرارداد ${sfx === 'C' ? 'اختیار خرید' : 'اختیار فروش'}`,
     kind: sfx === 'C' ? 'call' : 'put',
     bid, bidQty: n(r[`qTitMeDem_${sfx}`]),
     ask, askQty: n(r[`qTitMeOf_${sfx}`]),
@@ -96,9 +98,10 @@ export function buildChain(rows) {
 
     let ua = byUa.get(uaIns);
     if (!ua) {
+      const rawUaName = String(r.lval30_UA ?? '').trim();
       ua = {
         ins: uaIns,
-        name: String(r.lval30_UA ?? ''),
+        name: rawUaName && rawUaName !== uaIns ? rawUaName : 'دارایی پایه بدون نام',
         last: n(r.pDrCotVal_UA), close: n(r.pClosing_UA), yday: n(r.priceYesterday_UA),
         vol: n(r.qTotTran5J_UA), trades: n(r.zTotTran_UA), value: n(r.qTotCap_UA),
         low: 0, high: 0, book: null, state: 'A', staleSec: 0, depth: false,

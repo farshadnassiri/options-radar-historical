@@ -572,6 +572,8 @@ group('۱۲. زنجیره و ترکیب‌سازی');
 
   const chain = buildChain(rows);
   check('زنجیره دو نماد پایه ساخت', chain.size === 2, `${chain.size}`);
+  const sanitizedChain = buildChain([{ ...mkRow(100000, 30, 1000, 900, '123456', '123456'), insCode_C: '987654', lVal18AFC_C: '987654' }]);
+  check('نامی که فقط شناسه خام است با عنوان خوانا جایگزین می‌شود', sanitizedChain.get('123456')?.name === 'دارایی پایه بدون نام' && sanitizedChain.get('123456')?.expiryList[0]?.strikeList[0]?.call?.name === 'قرارداد اختیار خرید');
   const ua = chain.get('1');
   check('دو سررسید و پنج قیمت اعمال', ua.expiryList.length === 2 && ua.expiryList[0].strikeList.length === 5);
   check('سررسیدها صعودی مرتب شدند', ua.expiryList[0].days < ua.expiryList[1].days);
@@ -1783,6 +1785,9 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('ماتریس ورود×خروج همه تاریخ‌های پایه را نگه می‌دارد', rolling32.dates.length === 3 && rolling32.cells.length === 6, `${rolling32.dates.length} تاریخ، ${rolling32.cells.length} خانه`);
   check('خانه ماتریس بازده انباشته و تغییر همان روز را جدا دارد', Number.isFinite(cell32?.returnPct) && Number.isFinite(cell32?.dailyReturnPct) && cell32.holdingTradingDays === 1);
   check('تغییر روز ورود از صفر تا آفست همان روز است، نه صفر ساختگی', sameDayCell32?.dailyPnl === sameDayCell32?.netPnl);
+  check('ماتریس برای هر ورود، سرمایه و جریان‌های نقدی کامل خروجی می‌دهد', rolling32.entries.length === 3 && Number.isFinite(rolling32.entries[0]?.capital) && Number.isFinite(rolling32.entries[0]?.cashPaid) && Number.isFinite(rolling32.entries[0]?.cashReceived));
+  check('هر خانه جزئیات نقدشوندگی، کارمزد و اثر همه پاها را برای خروجی جامع دارد', cell32?.perLeg?.length === 2 && Number.isFinite(cell32?.baseClose) && Number.isFinite(cell32?.totalFees) && cell32.perLeg.every((leg) => Number.isFinite(leg.exitPrice) && Number.isFinite(leg.netPnl)));
+  check('خروجی ماتریس هیچ شناسه خام قرارداد یا دارایی پایه را حمل نمی‌کند', !JSON.stringify(rolling32).includes('"ins"'));
   const profile32 = holdingPeriodProfile(rolling32);
   check('پروفایل افق نگهداری، چند ورود را در روز معاملاتی یکسان تجمیع می‌کند', profile32.rows.find((r) => r.holdingTradingDays === 1)?.samples === 2);
   check('افق مقاوم فقط از افق دارای نمونه کافی انتخاب می‌شود', profile32.best?.holdingTradingDays === 1);

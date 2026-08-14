@@ -18,8 +18,12 @@ const basisOptions = (manual = false) => [
   ...(manual ? ['<option value="MANUAL">قیمت دستی هر پا</option>'] : []),
 ].join('');
 
-const contractLabel = (c) => `${c.name || c.ins} — ${c.kind === 'call' ? 'کال' : 'پوت'} ${fmt.int(c.strike)} — سررسید ${historyDateLabel(c.expiry)}`;
-const legLabel = (leg, index) => `${faDigits(index + 1)}. ${leg.side === 'buy' ? 'خرید' : 'فروش'} ${leg.kind === 'call' ? 'کال' : leg.kind === 'put' ? 'پوت' : 'سهم پایه'} × ${faDigits(leg.ratio)}`;
+const displayName = (entity, fallback = 'بدون نام') => {
+  const name = String(entity?.name || '').trim();
+  return name && name !== String(entity?.ins || '') ? name : fallback;
+};
+const contractLabel = (c) => `${displayName(c, 'قرارداد اختیار')} — ${c.kind === 'call' ? 'اختیار خرید' : 'اختیار فروش'} — اعمال ${fmt.int(c.strike)} — سررسید ${historyDateLabel(c.expiry)}`;
+const legLabel = (leg, index) => `${faDigits(index + 1)}. ${leg.side === 'buy' ? 'خرید' : 'فروش'} ${leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه'} × ${faDigits(leg.ratio)}`;
 const valueLabel = (value, estimated = false) => `${estimated ? '≈ ' : ''}${fmt.money(value)}`;
 
 function filterNumber(text) {
@@ -101,7 +105,7 @@ function lineChart(host, rows, series, { money = false } = {}) {
     const paths = series.map((s, index) => {
       if (!active.has(index)) return '';
       const points = data.map((r, i) => Number.isFinite(Number(r[s.key])) ? `${x(i).toFixed(1)},${y(Number(r[s.key])).toFixed(1)}` : '').filter(Boolean).join(' ');
-      return `<polyline class="history-line" fill="none" stroke="${s.color}" points="${points}"/>`;
+      return `<polyline class="history-line" fill="none" stroke="${s.color}" style="stroke-width:${s.width || 2.2}" points="${points}"/>`;
     }).join('');
     host.innerHTML = `<div class="history-chartbox"><div class="history-chart-legend">${series.map((s, i) => `<button type="button" data-series="${i}" aria-pressed="${active.has(i)}" style="--series:${s.color}"><i></i>${esc(s.label)}</button>`).join('')}</div><div class="history-chart-stage"><svg class="history-svg" viewBox="0 0 ${W} ${H}" tabindex="0" role="group" aria-label="نمودار تاریخی تعاملی؛ با حرکت ماوس جزئیات هر روز نمایش داده می‌شود">
       ${grid}${xTicks}<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="chart-zero"/>${paths}
@@ -181,9 +185,14 @@ function scatterChart(host, rows) {
 }
 
 function csvCell(value) {
-  const text = String(value ?? '');
+  const raw = String(value ?? '');
+  const text = typeof value !== 'number' && /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
+
+const xmlCell = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;',
+}[char]));
 
 export async function mount(root, { state }) {
   root.innerHTML = `
@@ -302,8 +311,8 @@ export async function mount(root, { state }) {
         <section class="card"><div class="section-head"><div><p class="eyebrow">خروج مشاهده‌شده و قاعده قابل‌تکرار</p><h2>بهینه‌سازی زمان و قیمت خروج</h2></div></div><div id="h-optimal"></div></section>
       </div>
 
-      <section class="card">
-        <div class="section-head"><div><p class="eyebrow">۱۴ روز قبل، ۱۳ روز قبل، …</p><h2>ماتریس ورودهای پیاپی</h2></div><button class="primary" id="h-rolling" type="button">محاسبه ماتریس</button></div>
+      <section class="card matrix-card">
+        <div class="section-head"><div><p class="eyebrow">ردیف = تاریخ ورود؛ ستون = تاریخ خروج</p><h2>ماتریس بازده ورود × خروج و مسیر معامله</h2></div><button class="primary" id="h-rolling" type="button">محاسبه ماتریس</button></div>
         <div class="rolling-controls">
           <label class="rolling-strategy-field" for="h-rolling-strategy">استراتژی / ترکیب قراردادها<select id="h-rolling-strategy"><option value="">ابتدا یک تحلیل معتبر اجرا کن</option></select></label>
           <label for="h-rolling-entry">قیمت ورود<select id="h-rolling-entry">${basisOptions(false)}</select></label>
@@ -316,13 +325,12 @@ export async function mount(root, { state }) {
           <label for="h-rolling-leg-value">حداقل ارزش هر قرارداد (میلیون ریال)<input id="h-rolling-leg-value" type="number" min="0" step="0.1" value="0"></label>
           <label for="h-rolling-leg-volume">حداقل حجم هر قرارداد<input id="h-rolling-leg-volume" type="number" min="0" step="1" value="0"></label>
         </div>
-        <p class="note">تنظیمات این بخش مستقل از تحلیل اصلی است. هر خانه نتیجه ورود با مبنای انتخابی در تاریخ ردیف و آفست با مبنای انتخابی در تاریخ ستون است؛ کارمزدهای تنظیمات برنامه اعمال می‌شوند.</p>
-        <div id="h-rolling-out" class="rolling-wrap"></div>
-      </section>
-
-      <section class="card">
-        <div class="section-head"><div><p class="eyebrow">ردیف = تاریخ ورود؛ ستون = تاریخ خروج</p><h2>ماتریس بازده ورود × خروج و مسیر معامله</h2></div><div class="matrix-mode" role="group" aria-label="نوع بازده ماتریس"><button type="button" class="ghost" data-matrix-mode="cumulative" aria-pressed="true">انباشته از ورود</button><button type="button" class="ghost" data-matrix-mode="daily" aria-pressed="false">تغییر همان روز</button></div></div>
-        <p class="note">روی هر عدد کلیک کن تا مسیر کامل معامله، بهترین/بدترین نقطه، افت، کارمزد، اثر هر پا و نسبت سود حفظ‌شده تا خروج نمایش داده شود.</p>
+        <div class="matrix-toolbar">
+          <div class="matrix-mode" role="group" aria-label="نوع بازده ماتریس"><button type="button" class="ghost" data-matrix-mode="cumulative" aria-pressed="true">انباشته از ورود</button><button type="button" class="ghost" data-matrix-mode="daily" aria-pressed="false">تغییر همان روز</button></div>
+          <div class="matrix-zoom" role="group" aria-label="بزرگ‌نمایی ماتریس"><button type="button" class="ghost" id="h-matrix-zoom-out" aria-label="کوچک‌نمایی ماتریس">−</button><button type="button" class="ghost" id="h-matrix-zoom-reset"><span id="h-matrix-zoom-label">۱۰۰٪</span></button><button type="button" class="ghost" id="h-matrix-zoom-in" aria-label="بزرگ‌نمایی ماتریس">+</button></div>
+          <div class="matrix-exports"><button type="button" class="ghost export-btn" id="h-matrix-export-csv" disabled>خروجی جامع CSV</button><button type="button" class="ghost export-btn" id="h-matrix-export-excel" disabled>خروجی جامع Excel</button></div>
+        </div>
+        <p class="note">تنظیمات این بخش مستقل از تحلیل اصلی است. هر خانه نتیجه ورود با مبنای انتخابی در تاریخ ردیف و آفست با مبنای انتخابی در تاریخ ستون است. روی هر عدد کلیک کن تا مسیر کامل معامله، بهترین/بدترین نقطه، افت، کارمزد و اثر هر پا نمایش داده شود.</p>
         <div id="h-return-matrix" class="rolling-wrap"><p class="empty-note">ابتدا «محاسبه ماتریس» را بزن.</p></div>
         <div id="h-trade-detail" class="trade-detail" hidden></div>
         <div class="section-head holding-head"><div><p class="eyebrow">تجمیع همه تاریخ‌های ورود</p><h3>پروفایل افق نگهداری</h3></div><span>برای کشف افق پایدار، میانه بازده با جریمه پراکندگی رتبه‌بندی می‌شود.</span></div>
@@ -336,7 +344,8 @@ export async function mount(root, { state }) {
   const loadBtn = $('h-load'), runBtn = $('h-run'), exportBtn = $('h-export');
   let chain = new Map(), ua = null, analysisUa = null, contracts = [], seriesByIns = {}, dates = [];
   let currentReplay = null, currentArgs = null, autoRows = [], selectedAuto = null;
-  let rollingResult = null, rollingArgs = null, rollingCandidates = [], matrixMode = 'cumulative', payoffChart = null;
+  let rollingResult = null, rollingArgs = null, rollingCandidates = [], matrixMode = 'cumulative', matrixZoom = 1, payoffChart = null;
+  let frozenDrag = null;
   let worker = null, seq = 0, rollingResolve = null;
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -386,16 +395,61 @@ export async function mount(root, { state }) {
       const strike = leg.kind === 'underlying' ? '—' : fmt.int(leg.strike);
       const expiry = leg.expiry ? historyDateLabel(leg.expiry) : '—';
       return `<article class="frozen-leg">
-        <b>${faDigits(index + 1)}. ${esc(side)} ${esc(kind)} · ${esc(leg.name || leg.ins)}</b>
-        <span>کد <strong>${esc(leg.ins)}</strong></span><span>اعمال <strong>${strike}</strong></span>
-        <span>سررسید <strong>${expiry}</strong></span><span>اندازه <strong>${fmt.int(leg.size || 1)}</strong></span>
+        <b>${faDigits(index + 1)}. ${esc(side)} ${esc(kind)} · ${esc(displayName(leg, `پای ${faDigits(index + 1)}`))}</b>
+        <span>اعمال <strong>${strike}</strong></span><span>سررسید <strong>${expiry}</strong></span>
+        <span>اندازه <strong>${fmt.int(leg.size || 1)}</strong></span>
         <span>نسبت کل <strong>${fmt.num(leg.ratio)}</strong></span><span>ورود <strong>${fmt.money(leg.price)}</strong></span>
       </article>`;
     }).join('');
-    $('h-frozen-strategy').innerHTML = `<div class="frozen-summary">
-      <span>استراتژی انتخاب‌شده · ثابت هنگام پیمایش</span><b>${esc(title)}</b>
-      <small>پایه ${esc(ua?.name || '')} (${esc(ua?.ins || '')}) · قیمت پایه ورود ${fmt.money(first?.baseClose)} · ${historyDateLabel(replay.startDate)} تا ${historyDateLabel(replay.endDate)} · ورود ${esc(entryMethod)} / خروج ${esc(basisName(currentArgs?.exitBasis))}</small>
+    $('h-frozen-strategy').innerHTML = `<div class="frozen-drag-handle" data-frozen-drag title="برای جابه‌جایی بکش">
+      <span>⠿ مشخصات موقعیت · برای جابه‌جایی بکش</span><button type="button" class="ghost" data-frozen-reset>بازنشانی جایگاه</button>
+    </div><div class="frozen-summary">
+      <span>استراتژی انتخاب‌شده</span><b>${esc(title)}</b>
+      <small>پایه ${esc(displayName(ua, 'دارایی پایه'))} · قیمت پایه ورود ${fmt.money(first?.baseClose)} · ${historyDateLabel(replay.startDate)} تا ${historyDateLabel(replay.endDate)} · ورود ${esc(entryMethod)} / خروج ${esc(basisName(currentArgs?.exitBasis))}</small>
     </div><div class="frozen-legs">${cards}</div>`;
+  }
+
+  function resetFrozenPosition() {
+    const card = $('h-frozen-strategy');
+    delete card.dataset.detached;
+    card.style.removeProperty('left'); card.style.removeProperty('top');
+    card.style.removeProperty('width'); card.style.removeProperty('height');
+    card.style.removeProperty('max-height');
+  }
+
+  function beginFrozenDrag(event) {
+    if (event.button !== 0 || event.target.closest('button') || !event.target.closest('[data-frozen-drag]')) return;
+    const card = $('h-frozen-strategy'), rect = card.getBoundingClientRect();
+    card.dataset.detached = 'true';
+    card.style.left = `${rect.left}px`; card.style.top = `${rect.top}px`;
+    card.style.width = `${Math.min(rect.width, window.innerWidth - 24)}px`;
+    card.style.maxHeight = `${Math.max(220, window.innerHeight - 24)}px`;
+    frozenDrag = { pointerId: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+    card.setPointerCapture?.(event.pointerId); card.classList.add('dragging');
+    event.preventDefault();
+  }
+
+  function moveFrozenCard(event) {
+    if (!frozenDrag || event.pointerId !== frozenDrag.pointerId) return;
+    const card = $('h-frozen-strategy'), rect = card.getBoundingClientRect();
+    const left = Math.min(Math.max(8, event.clientX - frozenDrag.dx), Math.max(8, window.innerWidth - rect.width - 8));
+    const top = Math.min(Math.max(8, event.clientY - frozenDrag.dy), Math.max(8, window.innerHeight - Math.min(rect.height, window.innerHeight - 16) - 8));
+    card.style.left = `${left}px`; card.style.top = `${top}px`;
+  }
+
+  function endFrozenDrag(event) {
+    if (!frozenDrag || event.pointerId !== frozenDrag.pointerId) return;
+    const card = $('h-frozen-strategy');
+    card.releasePointerCapture?.(event.pointerId); card.classList.remove('dragging'); frozenDrag = null;
+  }
+
+  function handleFrozenClick(event) {
+    if (event.target.closest('[data-frozen-reset]')) resetFrozenPosition();
+  }
+
+  function changeMatrixZoom(delta) {
+    matrixZoom = Math.min(2.5, Math.max(0.75, Math.round((matrixZoom + delta) * 100) / 100));
+    applyMatrixZoom();
   }
 
   function refreshRollingDates() {
@@ -452,6 +506,7 @@ export async function mount(root, { state }) {
     rollingArgs = null; rollingResult = null; setRollingCandidates([]);
     runBtn.disabled = true; exportBtn.disabled = true;
     $('h-range').hidden = true; $('h-legs-card').hidden = true; $('h-results').hidden = true;
+    $('h-matrix-export-csv').disabled = true; $('h-matrix-export-excel').disabled = true;
   }
 
   function buildExpiryControls() {
@@ -504,7 +559,7 @@ export async function mount(root, { state }) {
       for (const item of [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))) {
         const option = document.createElement('option');
         option.value = item.ins;
-        option.textContent = `${item.name} — ${fmt.int(item.contracts)} قرارداد${item.value > 0 ? ` — ارزش امروز ${fmt.money(item.value)}` : ''}`;
+        option.textContent = `${displayName(item, 'دارایی پایه بدون نام')} — ${fmt.int(item.contracts)} قرارداد${item.value > 0 ? ` — ارزش امروز ${fmt.money(item.value)}` : ''}`;
         baseSelect.appendChild(option);
       }
       setStatus(`${fmt.int(chain.size)} نماد پایه آماده است.`);
@@ -598,7 +653,7 @@ export async function mount(root, { state }) {
       wrap.appendChild(heading);
       if (leg.kind === 'underlying') {
         const fixed = document.createElement('span');
-        fixed.textContent = `${ua.name} — سهم پایه`;
+        fixed.textContent = `${displayName(ua, 'دارایی پایه')} — سهم پایه`;
         wrap.appendChild(fixed);
       } else {
         const select = document.createElement('select');
@@ -732,7 +787,7 @@ export async function mount(root, { state }) {
           : `فاقد داده · پای ${faDigits((r.missingLegs || []).map((i) => i + 1).join('،'))}`;
       return `<tr class="${r.status === 'missing' ? 'history-missing' : r.status === 'liquidity' ? 'history-liquidity' : ''}">
         <td><b>${esc(r.dayName)}</b><small>${esc(r.dateLabel)} · روز ${fmt.int(r.holdingDays)}</small></td>
-        <td><b>${esc(ua?.name || '')}</b><small>${esc(ua?.ins || '')}</small></td><td>${fmt.money(r.baseClose)}</td><td>${fmt.int(r.baseVolume)}</td><td>${valueLabel(r.baseValue, r.baseValueEstimated)}</td><td>${fmt.int(r.baseTrades)}</td><td class="${signTone(r.baseDailyPct)}">${fmt.pct(r.baseDailyPct)}</td><td class="${signTone(r.baseCumulativePct)}">${fmt.pct(r.baseCumulativePct)}</td>
+        <td><b>${esc(displayName(ua, 'دارایی پایه'))}</b></td><td>${fmt.money(r.baseClose)}</td><td>${fmt.int(r.baseVolume)}</td><td>${valueLabel(r.baseValue, r.baseValueEstimated)}</td><td>${fmt.int(r.baseTrades)}</td><td class="${signTone(r.baseDailyPct)}">${fmt.pct(r.baseDailyPct)}</td><td class="${signTone(r.baseCumulativePct)}">${fmt.pct(r.baseCumulativePct)}</td>
         ${legCells}<td>${Number.isFinite(r.grossPnl) ? fmt.money(r.grossPnl) : '—'}</td><td>${Number.isFinite(r.totalFees) ? fmt.money(r.totalFees) : '—'}</td>
         <td class="${signTone(r.netPnl)}">${Number.isFinite(r.netPnl) ? fmt.money(r.netPnl) : '—'}</td><td class="${signTone(r.pnlDelta)}">${Number.isFinite(r.pnlDelta) ? fmt.money(r.pnlDelta) : '—'}</td><td class="${signTone(r.returnPct)}">${Number.isFinite(r.returnPct) ? fmt.pct(r.returnPct) : '—'}</td>
         <td class="${signTone(r.drawdown)}">${Number.isFinite(r.drawdown) ? fmt.money(r.drawdown) : '—'}</td><td>${Number.isFinite(r.marginNet) && r.marginNet > 0 ? fmt.money(r.marginNet) : 'بدون وجه تضمین'}</td><td>${esc(statusText)}</td>
@@ -747,9 +802,16 @@ export async function mount(root, { state }) {
   }
 
   function paintLegEvolution(replay) {
-    const rows = replay.rows.map((r) => ({ ...r, ...Object.fromEntries((r.perLeg || []).map((l, i) => [`leg${i}`, l.netPnl])) }));
+    const rows = replay.rows.map((r) => ({
+      ...r,
+      legsNet: (r.perLeg || []).reduce((sum, leg) => sum + (Number.isFinite(leg.netPnl) ? leg.netPnl : 0), 0),
+      ...Object.fromEntries((r.perLeg || []).map((l, i) => [`leg${i}`, l.netPnl])),
+    }));
     const colors = ['#0b6e6b', '#a86c16', '#7254a3', '#a81f32', '#2f6f9f'];
-    lineChart($('h-leg-chart'), rows, replay.priced.map((leg, i) => ({ key: `leg${i}`, label: legLabel(leg, i), color: colors[i % colors.length] })), { money: true });
+    lineChart($('h-leg-chart'), rows, [
+      { key: 'legsNet', label: 'برآیند کل پاها', color: '#172d43', width: 3.8 },
+      ...replay.priced.map((leg, i) => ({ key: `leg${i}`, label: legLabel(leg, i), color: colors[i % colors.length] })),
+    ], { money: true });
   }
 
   function paintBasis(args) {
@@ -840,6 +902,15 @@ export async function mount(root, { state }) {
     return allDates.filter((_, i) => i % step === 0 || i === allDates.length - 1);
   }
 
+  function applyMatrixZoom() {
+    const host = $('h-return-matrix');
+    host.style.setProperty('--matrix-font', `${12.5 * matrixZoom}px`);
+    host.style.setProperty('--matrix-cell-width', `${68 * matrixZoom}px`);
+    host.style.setProperty('--matrix-cell-height', `${36 * matrixZoom}px`);
+    host.style.setProperty('--matrix-head-pad', `${7 * matrixZoom}px`);
+    $('h-matrix-zoom-label').textContent = `${fmt.int(matrixZoom * 100)}٪`;
+  }
+
   function renderReturnMatrix() {
     if (!rollingResult?.dates?.length) return;
     const shown = sampledDates(rollingResult.dates);
@@ -853,6 +924,7 @@ export async function mount(root, { state }) {
       const label = matrixMode === 'daily' ? 'تغییر همان روز' : 'بازده انباشته';
       return `<td style="background:${heatColor(value, max)}"><button type="button" data-trade-cell="${entry}|${exit}" title="${label}: ${fmt.pct(value)} · انباشته ${fmt.pct(c.returnPct)} · ${fmt.money(c.netPnl)}">${fmt.pct(value)}</button></td>`;
     }).join('')}</tr>`).join('')}</tbody></table>`;
+    applyMatrixZoom();
   }
 
   function renderHoldingProfile() {
@@ -900,7 +972,7 @@ export async function mount(root, { state }) {
     $('h-selected-label').textContent = label || legs.map((l) => l.name).join(' · ');
     renderFrozenStrategy(legs, replay, label);
     if (!rollingCandidates.length) {
-      setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg) => leg.name || leg.ins).join(' + ')}` }], legs);
+      setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')}` }], legs);
     } else {
       setRollingCandidates(rollingCandidates, legs);
     }
@@ -919,7 +991,7 @@ export async function mount(root, { state }) {
     lineChart($('h-dd-chart'), replay.rows, [{ key: 'drawdown', label: 'افت از قله', color: '#a81f32' }], { money: true });
     rollingResult = null;
     rollingArgs = null;
-    $('h-rolling-out').innerHTML = '';
+    $('h-matrix-export-csv').disabled = true; $('h-matrix-export-excel').disabled = true;
     $('h-return-matrix').innerHTML = '<p class="empty-note">ابتدا «محاسبه ماتریس» را بزن.</p>';
     $('h-holding-profile').innerHTML = '<p class="empty-note">پس از محاسبه ماتریس ساخته می‌شود.</p>';
     $('h-trade-detail').hidden = true;
@@ -933,7 +1005,7 @@ export async function mount(root, { state }) {
     autoRows = sorted;
     setRollingCandidates(sorted.slice(0, 1000).map((row) => ({
       legs: row.legs,
-      label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${row.legs.map((leg) => leg.name || leg.ins).join(' + ')} — اعمال ${row.strikes.map((strike) => fmt.int(strike)).join(' / ')} — ${fmt.pct(row.summary.last?.returnPct)}`,
+      label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${row.legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')} — اعمال ${row.strikes.map((strike) => fmt.int(strike)).join(' / ')} — ${fmt.pct(row.summary.last?.returnPct)}`,
     })));
     $('h-combos').innerHTML = sorted.slice(0, 1000).map((r, index) => `<tr tabindex="0" data-combo="${index}">
       <td>${esc(r.legs.map((l) => l.name).join(' + '))}</td><td>${r.strikes.map((k) => fmt.int(k)).join(' · ')}</td><td>${r.expiries.map(historyDateLabel).join(' · ')}</td>
@@ -959,7 +1031,7 @@ export async function mount(root, { state }) {
     const baseline = replayHistory(argsFor(combo.legs, {}));
     if (!baseline.ok) { setStatus(baseline.error, true); return; }
     $('h-auto-manual').hidden = false;
-    $('h-auto-prices').innerHTML = baseline.priced.map((leg, index) => `<label class="history-leg"><b>${esc(legLabel(leg, index))}</b><span>${esc(leg.name || leg.ins)}</span><input type="number" min="0" step="any" value="${leg.price}" data-auto-manual="${index}" aria-label="قیمت دستی ورود پای ${index + 1}"></label>`).join('');
+    $('h-auto-prices').innerHTML = baseline.priced.map((leg, index) => `<label class="history-leg"><b>${esc(legLabel(leg, index))}</b><span>${esc(displayName(leg, `پای ${faDigits(index + 1)}`))}</span><input type="number" min="0" step="any" value="${leg.price}" data-auto-manual="${index}" aria-label="قیمت دستی ورود پای ${index + 1}"></label>`).join('');
     renderReplay(combo.legs, {}, combo.legs.map((l) => l.name).join(' + '));
   }
 
@@ -973,7 +1045,7 @@ export async function mount(root, { state }) {
         if (legs.length !== byId(strategySelect.value).legs.length) throw new Error('برای همه پاها قرارداد انتخاب نشده است');
         const manual = manualPrices();
         if (entrySelect.value === 'MANUAL' && Object.keys(manual).length !== legs.length) throw new Error('قیمت دستی ورود همه پاها را وارد کن');
-        setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg) => leg.name || leg.ins).join(' + ')}` }], legs);
+        setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')}` }], legs);
         renderReplay(legs, manual);
       } else {
         if (entrySelect.value === 'MANUAL') throw new Error('در حالت تمام ترکیب‌ها ابتدا یکی از چهار قیمت تاریخی را انتخاب کن');
@@ -1003,18 +1075,142 @@ export async function mount(root, { state }) {
   function exportCsv() {
     if (!currentReplay) return;
     const legHeads = currentReplay.priced.flatMap((_, i) => [`قیمت آفست پای ${i + 1}`, `اثر تجمعی پای ${i + 1}`, `تغییر روز پای ${i + 1}`, `حجم پای ${i + 1}`, `ارزش پای ${i + 1}`]);
-    const heads = ['تاریخ', 'روز', 'روز نگهداری', 'نماد پایه', 'کد پایه', 'پایانی پایه', 'حجم پایه', 'ارزش پایه', 'تعداد معامله پایه', 'تغییر روزانه پایه ٪', 'تغییر از ورود پایه ٪', ...legHeads, 'سود ناخالص', 'کارمزد کل', 'سود خالص', 'تغییر سود روز', 'بازده ٪', 'افت از قله', 'وجه تضمین خالص', 'وضعیت'];
-    const lines = [heads, ...currentReplay.rows.map((r) => [r.dateLabel, r.dayName, r.holdingDays, ua?.name || '', ua?.ins || '', r.baseClose, r.baseVolume, r.baseValue, r.baseTrades, r.baseDailyPct, r.baseCumulativePct, ...r.perLeg.flatMap((l) => [l.exitPrice, l.netPnl, l.pnlDelta, l.volume, l.value]), r.grossPnl, r.totalFees, r.netPnl, r.pnlDelta, r.returnPct, r.drawdown, r.marginNet, r.status === 'ok' ? 'معتبر' : r.status === 'liquidity' ? 'حذف نقدشوندگی' : 'فاقد داده'])];
+    const heads = ['تاریخ', 'روز', 'روز نگهداری', 'دارایی پایه', 'پایانی پایه', 'حجم پایه', 'ارزش پایه', 'تعداد معامله پایه', 'تغییر روزانه پایه ٪', 'تغییر از ورود پایه ٪', ...legHeads, 'سود ناخالص', 'کارمزد کل', 'سود خالص', 'تغییر سود روز', 'بازده ٪', 'افت از قله', 'وجه تضمین خالص', 'وضعیت'];
+    const lines = [heads, ...currentReplay.rows.map((r) => [r.dateLabel, r.dayName, r.holdingDays, displayName(ua, 'دارایی پایه'), r.baseClose, r.baseVolume, r.baseValue, r.baseTrades, r.baseDailyPct, r.baseCumulativePct, ...r.perLeg.flatMap((l) => [l.exitPrice, l.netPnl, l.pnlDelta, l.volume, l.value]), r.grossPnl, r.totalFees, r.netPnl, r.pnlDelta, r.returnPct, r.drawdown, r.marginNet, r.status === 'ok' ? 'معتبر' : r.status === 'liquidity' ? 'حذف نقدشوندگی' : 'فاقد داده'])];
     const blob = new Blob(['\ufeff' + lines.map((row) => row.map(csvCell).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob); link.download = `options-history-${currentReplay.startDate}-${currentReplay.endDate}.csv`;
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0);
   }
 
+  function downloadMatrixFile(content, type, extension) {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([content], { type }));
+    link.download = `strategy-matrix-${rollingArgs.startDate}-${rollingArgs.endDate}.${extension}`;
+    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0);
+  }
+
+  function buildMatrixExport() {
+    if (!rollingResult?.cells?.length || !rollingArgs) throw new Error('ابتدا ماتریس را محاسبه کن');
+    const def = byId(strategySelect.value) || {};
+    const cleanValue = (value) => typeof value === 'number'
+      ? (Number.isFinite(value) ? value : '')
+      : (value ?? '');
+    const entries = new Map((rollingResult.entries || []).map((entry) => [entry.entryDate, entry]));
+    const maxLegs = Math.max(0, ...(rollingResult.entries || []).map((entry) => entry.legs?.length || 0));
+    const liquidity = rollingArgs.liquidity || {};
+    const meta = [
+      ['عنوان گزارش', 'خروجی جامع ماتریس ورود × خروج'],
+      ['استراتژی', def.name || 'ترکیب انتخابی'],
+      ['گروه', GROUPS[def.group] || '—'],
+      ['جهت مورد انتظار', def.dir || '—'],
+      ['شرح استراتژی', def.note || '—'],
+      ['هشدار ریسک', def.risk || 'ریسک محدود بر اساس ساختار و قیمت‌های انتخابی'],
+      ['دارایی پایه', displayName(ua, 'دارایی پایه')],
+      ['مبنای قیمت ورود', basisName(rollingArgs.entryBasis)],
+      ['مبنای قیمت خروج', basisName(rollingArgs.exitBasis)],
+      ['شروع بررسی', `${historyDayName(rollingArgs.startDate)} ${historyDateLabel(rollingArgs.startDate)}`],
+      ['پایان بررسی', `${historyDayName(rollingArgs.endDate)} ${historyDateLabel(rollingArgs.endDate)}`],
+      ['تعداد واحد', rollingArgs.units],
+      ['حداقل ارزش پایه', liquidity.minBaseValue || 0],
+      ['حداقل حجم پایه', liquidity.minBaseVolume || 0],
+      ['حداقل ارزش هر قرارداد', liquidity.minLegValue || 0],
+      ['حداقل حجم هر قرارداد', liquidity.minLegVolume || 0],
+      ['تعداد تاریخ', rollingResult.dates?.length || 0],
+      ['تعداد خانه معتبر', rollingResult.cells.length],
+      ['توضیح بازده انباشته', 'سود و بازده کل از تاریخ ورود ردیف تا تاریخ خروج ستون'],
+      ['توضیح تغییر همان روز', 'تغییر سود و بازده فقط در روز خروج نسبت به روز معاملاتی قبل'],
+      ['یادآوری', 'نتایج تاریخی و بدون تضمین اجرای واقعی یا تکرار در آینده‌اند.'],
+      ['زمان تولید', new Date().toLocaleString('fa-IR')],
+    ];
+    const fields = [
+      ['استراتژی', () => def.name || 'ترکیب انتخابی'], ['گروه', () => GROUPS[def.group] || '—'],
+      ['جهت مورد انتظار', () => def.dir || '—'], ['دارایی پایه', () => displayName(ua, 'دارایی پایه')],
+      ['مبنای ورود', () => basisName(rollingArgs.entryBasis)], ['مبنای خروج', () => basisName(rollingArgs.exitBasis)],
+      ['تعداد واحد', () => rollingArgs.units],
+      ['تاریخ ورود', ({ cell }) => historyDateLabel(cell.entryDate)], ['روز ورود', ({ cell }) => historyDayName(cell.entryDate)],
+      ['تاریخ خروج', ({ cell }) => historyDateLabel(cell.exitDate)], ['روز خروج', ({ cell }) => historyDayName(cell.exitDate)],
+      ['روز معاملاتی نگهداری', ({ cell }) => cell.holdingTradingDays], ['روز تقویمی نگهداری', ({ cell }) => cell.holdingCalendarDays],
+      ['قیمت پایه خروج', ({ cell }) => cell.baseClose], ['تغییر روزانه پایه ٪', ({ cell }) => cell.baseDailyPct],
+      ['بازده پایه از ورود ٪', ({ cell }) => cell.baseReturnPct], ['حجم پایه خروج', ({ cell }) => cell.baseVolume],
+      ['تعداد معامله پایه خروج', ({ cell }) => cell.baseTrades], ['ارزش پایه خروج', ({ cell }) => cell.baseValue],
+      ['ارزش پایه خروج برآوردی است', ({ cell }) => cell.baseValueEstimated ? 'بله' : 'خیر'],
+      ['سود ناخالص', ({ cell }) => cell.grossPnl], ['سود خالص انباشته', ({ cell }) => cell.netPnl],
+      ['تغییر سود همان روز', ({ cell }) => cell.dailyPnl], ['بازده انباشته ٪', ({ cell }) => cell.returnPct],
+      ['تغییر بازده همان روز ٪', ({ cell }) => cell.dailyReturnPct], ['افت از قله', ({ cell }) => cell.drawdown],
+      ['کارمزد ورود', ({ cell }) => cell.entryFee], ['کارمزد خروج', ({ cell }) => cell.exitFee],
+      ['کل کارمزد', ({ cell }) => cell.totalFees], ['سرمایه درگیر', ({ entry }) => entry?.capital],
+      ['مبنای سرمایه', ({ entry }) => entry?.capitalLabel], ['پرداختی ورود', ({ entry }) => entry?.cashPaid],
+      ['دریافتی ورود', ({ entry }) => entry?.cashReceived], ['جریان ناخالص ورود', ({ entry }) => entry?.cashNetGross],
+      ['جریان خالص ورود', ({ entry }) => entry?.netCash], ['وجه تضمین ورود', ({ entry }) => entry?.margin],
+      ['وجه تضمین خالص ورود', ({ entry }) => entry?.marginNet], ['وجه تضمین روز خروج', ({ cell }) => cell.margin],
+      ['وجه تضمین خالص روز خروج', ({ cell }) => cell.marginNet], ['وجه تضمین شرطی روز خروج', ({ cell }) => cell.conditionalMargin],
+    ];
+    const legFields = [
+      ['نام', (entryLeg) => entryLeg?.name], ['جهت', (entryLeg) => entryLeg?.side === 'buy' ? 'خرید' : entryLeg?.side === 'sell' ? 'فروش' : '—'],
+      ['نوع', (entryLeg) => entryLeg?.kind === 'call' ? 'اختیار خرید' : entryLeg?.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه'],
+      ['اعمال', (entryLeg) => entryLeg?.strike], ['سررسید', (entryLeg) => entryLeg?.expiry ? historyDateLabel(entryLeg.expiry) : '—'],
+      ['اندازه', (entryLeg) => entryLeg?.size], ['نسبت کل', (entryLeg) => entryLeg?.ratio],
+      ['قیمت ورود', (entryLeg) => entryLeg?.entryPrice], ['حجم ورود', (entryLeg) => entryLeg?.entryVolume],
+      ['تعداد معامله ورود', (entryLeg) => entryLeg?.entryTrades], ['ارزش ورود', (entryLeg) => entryLeg?.entryValue],
+      ['ارزش ورود برآوردی است', (entryLeg) => entryLeg?.entryValueEstimated ? 'بله' : 'خیر'],
+      ['قیمت خروج', (_, exitLeg) => exitLeg?.exitPrice], ['سود ناخالص', (_, exitLeg) => exitLeg?.grossPnl],
+      ['سود خالص', (_, exitLeg) => exitLeg?.netPnl], ['تغییر سود همان روز', (_, exitLeg) => exitLeg?.pnlDelta],
+      ['کارمزد ورود', (_, exitLeg) => exitLeg?.entryFee], ['کارمزد خروج', (_, exitLeg) => exitLeg?.exitFee],
+      ['حجم خروج', (_, exitLeg) => exitLeg?.volume], ['تعداد معامله خروج', (_, exitLeg) => exitLeg?.trades],
+      ['ارزش خروج', (_, exitLeg) => exitLeg?.value], ['ارزش خروج برآوردی است', (_, exitLeg) => exitLeg?.valueEstimated ? 'بله' : 'خیر'],
+    ];
+    const headers = fields.map(([label]) => label);
+    for (let i = 0; i < maxLegs; i++) for (const [label] of legFields) headers.push(`پای ${i + 1} — ${label}`);
+    const rows = rollingResult.cells.map((cell) => {
+      const entry = entries.get(cell.entryDate), context = { cell, entry };
+      const row = fields.map(([, get]) => get(context));
+      for (let i = 0; i < maxLegs; i++) {
+        const entryLeg = entry?.legs?.[i], exitLeg = cell.perLeg?.[i];
+        row.push(...legFields.map(([, get]) => get(entryLeg, exitLeg)));
+      }
+      return row.map(cleanValue);
+    });
+    const profile = holdingPeriodProfile(rollingResult);
+    const profileHeaders = ['روز معاملاتی نگهداری', 'تعداد نمونه', 'میانگین بازده ٪', 'میانه بازده ٪', 'چارک ۲۵٪', 'چارک ۷۵٪', 'انحراف معیار ٪', 'درصد سودده', 'میانگین تغییر روز خروج ٪', 'امتیاز مقاوم'];
+    const profileRows = profile.rows.map((row) => [row.holdingTradingDays, row.samples, row.meanReturn, row.medianReturn, row.p25, row.p75, row.returnStdDev, row.winPct, row.meanDailyChange, row.robustScore].map(cleanValue));
+    return { meta, headers, rows, profileHeaders, profileRows };
+  }
+
+  function exportMatrixCsv() {
+    try {
+      const report = buildMatrixExport();
+      const lines = [
+        ...report.meta.map((row) => row.map(csvCell).join(',')), '',
+        report.headers.map(csvCell).join(','),
+        ...report.rows.map((row) => row.map(csvCell).join(',')), '',
+        'پروفایل افق نگهداری', report.profileHeaders.map(csvCell).join(','),
+        ...report.profileRows.map((row) => row.map(csvCell).join(',')),
+      ];
+      downloadMatrixFile(`\ufeff${lines.join('\n')}`, 'text/csv;charset=utf-8', 'csv');
+    } catch (error) { setStatus(error.message, true); }
+  }
+
+  function exportMatrixExcel() {
+    try {
+      const report = buildMatrixExport();
+      const cell = (value, style = '') => {
+        const numeric = typeof value === 'number' && Number.isFinite(value);
+        return `<Cell${style ? ` ss:StyleID="${style}"` : ''}><Data ss:Type="${numeric ? 'Number' : 'String'}">${xmlCell(numeric ? value : value ?? '')}</Data></Cell>`;
+      };
+      const sheet = (name, headers, rows) => `<Worksheet ss:Name="${xmlCell(name)}"><Table><Row>${headers.map((value) => cell(value, 'Header')).join('')}</Row>${rows.map((row) => `<Row>${row.map((value) => cell(value)).join('')}</Row>`).join('')}</Table><WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><FreezePanes/><FrozenNoSplit/><SplitHorizontal>1</SplitHorizontal><TopRowBottomPane>1</TopRowBottomPane><ProtectObjects>False</ProtectObjects><ProtectScenarios>False</ProtectScenarios></WorksheetOptions></Worksheet>`;
+      const chunks = Array.from({ length: Math.ceil(report.rows.length / 60000) }, (_, index) => report.rows.slice(index * 60000, (index + 1) * 60000));
+      const xml = `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="Default"><Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/><Font ss:FontName="Tahoma" ss:Size="11"/></Style><Style ss:ID="Header"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#0B6E6B" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/></Style></Styles>${sheet('راهنما', ['شاخص', 'مقدار'], report.meta)}${chunks.map((rows, index) => sheet(`داده ${index + 1}`, report.headers, rows)).join('')}${sheet('پروفایل نگهداری', report.profileHeaders, report.profileRows)}</Workbook>`;
+      downloadMatrixFile(`\ufeff${xml}`, 'application/vnd.ms-excel;charset=utf-8', 'xls');
+    } catch (error) { setStatus(error.message, true); }
+  }
+
   async function renderRolling() {
     if (!currentArgs) return;
     const button = $('h-rolling'); button.disabled = true;
-    $('h-rolling-out').innerHTML = '<p class="empty-note">در حال محاسبه…</p>';
+    rollingResult = null;
+    $('h-matrix-export-csv').disabled = true; $('h-matrix-export-excel').disabled = true;
+    $('h-return-matrix').innerHTML = '<p class="empty-note">در حال محاسبه ماتریس…</p>';
     let response;
     try {
       rollingArgs = rollingArgsForSelection();
@@ -1024,23 +1220,19 @@ export async function mount(root, { state }) {
         ensureHistoryWorker().postMessage({ type: 'rolling', id, args: rollingArgs });
       });
     } catch (error) {
-      $('h-rolling-out').textContent = error.message;
+      $('h-return-matrix').textContent = error.message;
       setStatus(error.message, true);
       return;
     } finally {
       button.disabled = false;
     }
-    if (response.error) { $('h-rolling-out').textContent = response.error; return; }
+    if (response.error) { $('h-return-matrix').textContent = response.error; return; }
     const result = response.result;
     rollingResult = result;
     const allDates = result.dates || [];
-    if (!allDates.length) { $('h-rolling-out').textContent = 'داده‌ای برای ماتریس نیست.'; return; }
-    const shown = sampledDates(allDates);
-    const map = new Map((result.cells || []).map((c) => [`${c.entryDate}|${c.exitDate}`, c]));
-    const vals = [...map.values()].map((c) => Math.abs(c.returnPct)).filter(Number.isFinite);
-    const max = Math.max(...vals, 1);
-    $('h-rolling-out').innerHTML = `<table class="rolling-table"><thead><tr><th>ورود \ آفست</th>${shown.map((d) => `<th title="${historyDateLabel(d)}">${historyDateLabel(d).slice(5)}</th>`).join('')}</tr></thead><tbody>${shown.map((entry) => `<tr><th>${historyDateLabel(entry)}</th>${shown.map((exit) => { const c = map.get(`${entry}|${exit}`); return `<td style="background:${heatColor(c?.returnPct, max)}" title="${c ? `${historyDateLabel(entry)} تا ${historyDateLabel(exit)}: ${fmt.pct(c.returnPct)} · ${fmt.money(c.netPnl)}` : 'فاقد داده'}">${c ? fmt.pct(c.returnPct) : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table>`;
+    if (!allDates.length) { $('h-return-matrix').textContent = 'داده‌ای برای ماتریس نیست.'; return; }
     renderReturnMatrix(); renderHoldingProfile();
+    $('h-matrix-export-csv').disabled = false; $('h-matrix-export-excel').disabled = false;
     $('h-trade-detail').hidden = true;
     setStatus(`ماتریس با ورود ${basisName(rollingArgs.entryBasis)} و خروج ${basisName(rollingArgs.exitBasis)} آماده شد.`);
   }
@@ -1061,6 +1253,17 @@ export async function mount(root, { state }) {
   });
   loadBtn.addEventListener('click', loadHistory); runBtn.addEventListener('click', runAnalysis);
   exportBtn.addEventListener('click', exportCsv); $('h-rolling').addEventListener('click', renderRolling);
+  $('h-matrix-export-csv').addEventListener('click', exportMatrixCsv);
+  $('h-matrix-export-excel').addEventListener('click', exportMatrixExcel);
+  $('h-matrix-zoom-out').addEventListener('click', () => changeMatrixZoom(-0.15));
+  $('h-matrix-zoom-in').addEventListener('click', () => changeMatrixZoom(0.15));
+  $('h-matrix-zoom-reset').addEventListener('click', () => { matrixZoom = 1; applyMatrixZoom(); });
+  const frozenCard = $('h-frozen-strategy');
+  frozenCard.addEventListener('pointerdown', beginFrozenDrag);
+  frozenCard.addEventListener('pointermove', moveFrozenCard);
+  frozenCard.addEventListener('pointerup', endFrozenDrag);
+  frozenCard.addEventListener('pointercancel', endFrozenDrag);
+  frozenCard.addEventListener('click', handleFrozenClick);
   $('h-payoff-day').addEventListener('input', renderDailyPayoff);
   root.querySelectorAll('[data-payoff-layer]').forEach((input) => input.addEventListener('change', renderDailyPayoff));
   root.querySelectorAll('[data-matrix-mode]').forEach((button) => button.addEventListener('click', () => {
@@ -1103,5 +1306,12 @@ export async function mount(root, { state }) {
   });
 
   await loadUniverse();
-  return () => { payoffChart?.destroy?.(); if (worker) worker.terminate(); };
+  return () => {
+    payoffChart?.destroy?.(); if (worker) worker.terminate();
+    frozenCard.removeEventListener('pointerdown', beginFrozenDrag);
+    frozenCard.removeEventListener('pointermove', moveFrozenCard);
+    frozenCard.removeEventListener('pointerup', endFrozenDrag);
+    frozenCard.removeEventListener('pointercancel', endFrozenDrag);
+    frozenCard.removeEventListener('click', handleFrozenClick);
+  };
 }

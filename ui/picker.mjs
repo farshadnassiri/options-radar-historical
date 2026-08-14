@@ -6,6 +6,10 @@
 import { fmt, normFa } from '/ui/fmt.mjs';
 
 const KEY = 'picker.selected';
+const displayName = (entity) => {
+  const name = String(entity?.name || '').trim();
+  return name && name !== String(entity?.ins || '') ? name : 'دارایی پایه بدون نام';
+};
 
 // حافظه خصوصی/محدودشده مرورگر localStorage را قفل یا پرتاب‌گر می‌کند —
 // table.mjs و رول تاشدگی فهرست کناری (app.mjs) از قبل همین نگهبان را
@@ -54,7 +58,7 @@ export function makePicker(host, opts = {}) {
     // کناری تب‌ها.
     const nq = filter ? normFa(filter) : '';
     const shown = nq
-      ? list.filter((u) => normFa(u.name).includes(nq) || normFa(u.ins).includes(nq))
+      ? list.filter((u) => normFa(displayName(u)).includes(nq))
       : list;
     listHost.innerHTML = '';
     const frag = document.createDocumentFragment();
@@ -64,7 +68,7 @@ export function makePicker(host, opts = {}) {
       row.setAttribute('aria-selected', selected.has(u.ins) ? 'true' : 'false');
       row.innerHTML = `
         <input type="checkbox" ${selected.has(u.ins) ? 'checked' : ''}>
-        <span>${u.name || u.ins}</span>
+        <span>${displayName(u)}</span>
         <span class="m">${fmt.int(u.contracts)} قرارداد</span>
         <span class="m">${fmt.int(u.quoted)} مظنه</span>
         <span class="m">${u.last ? fmt.money(u.last) : '—'}</span>`;
