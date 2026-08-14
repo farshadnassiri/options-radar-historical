@@ -243,6 +243,9 @@ export async function mount(root, { state }) {
     </section>
 
     <section id="h-results" hidden>
+      <aside class="history-frozen" id="h-frozen-strategy" aria-live="polite">
+        <div class="frozen-summary"><span>استراتژی انتخاب‌شده</span><b>پس از اجرای تحلیل، مشخصات قرارداد اینجا ثابت می‌ماند.</b></div>
+      </aside>
       <div class="history-kpis" id="h-kpis"></div>
       <section class="card" id="h-auto-card" hidden>
         <div class="section-head"><div><p class="eyebrow">حالت خودکار</p><h2>ترکیب‌های ممکن</h2></div><span id="h-combo-note"></span></div>
@@ -300,8 +303,20 @@ export async function mount(root, { state }) {
       </div>
 
       <section class="card">
-        <div class="section-head"><div><p class="eyebrow">۱۴ روز قبل، ۱۳ روز قبل، …</p><h2>ماتریس ورودهای پیاپی</h2></div><button class="ghost" id="h-rolling" type="button">محاسبه ماتریس</button></div>
-        <p class="note">هر خانه نتیجه ورود در یک روز و آفست در روز بعدی است. برای بازه‌های بلند، تاریخ‌ها نمونه‌برداری می‌شوند تا نمودار خوانا بماند.</p>
+        <div class="section-head"><div><p class="eyebrow">۱۴ روز قبل، ۱۳ روز قبل، …</p><h2>ماتریس ورودهای پیاپی</h2></div><button class="primary" id="h-rolling" type="button">محاسبه ماتریس</button></div>
+        <div class="rolling-controls">
+          <label class="rolling-strategy-field" for="h-rolling-strategy">استراتژی / ترکیب قراردادها<select id="h-rolling-strategy"><option value="">ابتدا یک تحلیل معتبر اجرا کن</option></select></label>
+          <label for="h-rolling-entry">قیمت ورود<select id="h-rolling-entry">${basisOptions(false)}</select></label>
+          <label for="h-rolling-exit">قیمت تسویه / آفست<select id="h-rolling-exit">${basisOptions(false)}</select></label>
+          <label for="h-rolling-units">تعداد واحد<input id="h-rolling-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
+          <label for="h-rolling-start">شروع بررسی<select id="h-rolling-start"></select></label>
+          <label for="h-rolling-end">پایان بررسی<select id="h-rolling-end"></select></label>
+          <label for="h-rolling-base-value">حداقل ارزش پایه (میلیارد ریال)<input id="h-rolling-base-value" type="number" min="0" step="0.1" value="0"></label>
+          <label for="h-rolling-base-volume">حداقل حجم پایه<input id="h-rolling-base-volume" type="number" min="0" step="1" value="0"></label>
+          <label for="h-rolling-leg-value">حداقل ارزش هر قرارداد (میلیون ریال)<input id="h-rolling-leg-value" type="number" min="0" step="0.1" value="0"></label>
+          <label for="h-rolling-leg-volume">حداقل حجم هر قرارداد<input id="h-rolling-leg-volume" type="number" min="0" step="1" value="0"></label>
+        </div>
+        <p class="note">تنظیمات این بخش مستقل از تحلیل اصلی است. هر خانه نتیجه ورود با مبنای انتخابی در تاریخ ردیف و آفست با مبنای انتخابی در تاریخ ستون است؛ کارمزدهای تنظیمات برنامه اعمال می‌شوند.</p>
         <div id="h-rolling-out" class="rolling-wrap"></div>
       </section>
 
@@ -321,7 +336,7 @@ export async function mount(root, { state }) {
   const loadBtn = $('h-load'), runBtn = $('h-run'), exportBtn = $('h-export');
   let chain = new Map(), ua = null, analysisUa = null, contracts = [], seriesByIns = {}, dates = [];
   let currentReplay = null, currentArgs = null, autoRows = [], selectedAuto = null;
-  let rollingResult = null, matrixMode = 'cumulative', payoffChart = null;
+  let rollingResult = null, rollingArgs = null, rollingCandidates = [], matrixMode = 'cumulative', payoffChart = null;
   let worker = null, seq = 0, rollingResolve = null;
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -350,6 +365,75 @@ export async function mount(root, { state }) {
     minLegVolume: Math.max(0, Number($('h-leg-volume').value) || 0),
   });
 
+  const rollingLiquidityArgs = () => ({
+    minBaseValue: Math.max(0, Number($('h-rolling-base-value').value) || 0) * 1e9,
+    minBaseVolume: Math.max(0, Number($('h-rolling-base-volume').value) || 0),
+    minLegValue: Math.max(0, Number($('h-rolling-leg-value').value) || 0) * 1e6,
+    minLegVolume: Math.max(0, Number($('h-rolling-leg-volume').value) || 0),
+  });
+
+  const basisName = (value) => HISTORY_BASES.find(([key]) => key === value)?.[1] || value || '—';
+  const legSignature = (legs = []) => legs.map((leg) => `${leg.ins}|${leg.side}|${leg.ratio}`).join('::');
+
+  function renderFrozenStrategy(legs, replay, label = '') {
+    const def = byId(strategySelect.value);
+    const first = replay.rows.find((row) => Number.isFinite(row.baseClose));
+    const title = label || def?.name || 'ترکیب انتخاب‌شده';
+    const entryMethod = Object.keys(currentArgs?.manualEntry || {}).length ? 'دستی هر پا' : basisName(currentArgs?.entryBasis);
+    const cards = replay.priced.map((leg, index) => {
+      const kind = leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه';
+      const side = leg.side === 'buy' ? 'خرید' : 'فروش';
+      const strike = leg.kind === 'underlying' ? '—' : fmt.int(leg.strike);
+      const expiry = leg.expiry ? historyDateLabel(leg.expiry) : '—';
+      return `<article class="frozen-leg">
+        <b>${faDigits(index + 1)}. ${esc(side)} ${esc(kind)} · ${esc(leg.name || leg.ins)}</b>
+        <span>کد <strong>${esc(leg.ins)}</strong></span><span>اعمال <strong>${strike}</strong></span>
+        <span>سررسید <strong>${expiry}</strong></span><span>اندازه <strong>${fmt.int(leg.size || 1)}</strong></span>
+        <span>نسبت کل <strong>${fmt.num(leg.ratio)}</strong></span><span>ورود <strong>${fmt.money(leg.price)}</strong></span>
+      </article>`;
+    }).join('');
+    $('h-frozen-strategy').innerHTML = `<div class="frozen-summary">
+      <span>استراتژی انتخاب‌شده · ثابت هنگام پیمایش</span><b>${esc(title)}</b>
+      <small>پایه ${esc(ua?.name || '')} (${esc(ua?.ins || '')}) · قیمت پایه ورود ${fmt.money(first?.baseClose)} · ${historyDateLabel(replay.startDate)} تا ${historyDateLabel(replay.endDate)} · ورود ${esc(entryMethod)} / خروج ${esc(basisName(currentArgs?.exitBasis))}</small>
+    </div><div class="frozen-legs">${cards}</div>`;
+  }
+
+  function refreshRollingDates() {
+    const start = $('h-rolling-start'), end = $('h-rolling-end');
+    const options = dates.map((date) => `<option value="${date}">${historyDayName(date)} ${historyDateLabel(date)}</option>`).join('');
+    start.innerHTML = options; end.innerHTML = options;
+    if (dates.length) {
+      start.value = String(dates[Math.max(0, Number($('h-start').value) || 0)]);
+      end.value = String(dates[Math.min(dates.length - 1, Number($('h-end').value) || dates.length - 1)]);
+    }
+  }
+
+  function setRollingCandidates(candidates, preferredLegs = null) {
+    rollingCandidates = candidates.filter((item) => item?.legs?.length);
+    const select = $('h-rolling-strategy');
+    select.innerHTML = rollingCandidates.length
+      ? rollingCandidates.map((item, index) => `<option value="${index}">${esc(item.label)}</option>`).join('')
+      : '<option value="">ابتدا یک تحلیل معتبر اجرا کن</option>';
+    if (preferredLegs) {
+      const preferred = legSignature(preferredLegs);
+      const index = rollingCandidates.findIndex((item) => legSignature(item.legs) === preferred);
+      if (index >= 0) select.value = String(index);
+    }
+  }
+
+  function rollingArgsForSelection() {
+    const candidate = rollingCandidates[Number($('h-rolling-strategy').value)];
+    if (!candidate) throw new Error('برای ماتریس یک استراتژی یا ترکیب قرارداد انتخاب کن');
+    const startDate = Number($('h-rolling-start').value), endDate = Number($('h-rolling-end').value);
+    if (!startDate || !endDate || startDate > endDate) throw new Error('بازه زمانی ماتریس معتبر نیست');
+    return {
+      legs: candidate.legs, seriesByIns, baseIns: String(ua.ins), startDate, endDate,
+      entryBasis: $('h-rolling-entry').value, exitBasis: $('h-rolling-exit').value,
+      manualEntry: {}, units: Math.max(1, Math.trunc(Number($('h-rolling-units').value) || 1)),
+      fees: feesOf(state.settings), settings: state.settings, liquidity: rollingLiquidityArgs(),
+    };
+  }
+
   const selectedExpirySet = () => new Set([...root.querySelectorAll('[data-history-expiry]:checked')].map((input) => Number(input.value)));
 
   function paintExpirySummary() {
@@ -365,6 +449,7 @@ export async function mount(root, { state }) {
 
   function invalidateLoadedHistory() {
     analysisUa = null; contracts = []; seriesByIns = {}; dates = [];
+    rollingArgs = null; rollingResult = null; setRollingCandidates([]);
     runBtn.disabled = true; exportBtn.disabled = true;
     $('h-range').hidden = true; $('h-legs-card').hidden = true; $('h-results').hidden = true;
   }
@@ -467,6 +552,14 @@ export async function mount(root, { state }) {
       runBtn.disabled = false;
       buildLegControls();
       paintRange();
+      refreshRollingDates();
+      $('h-rolling-entry').value = entrySelect.value === 'MANUAL' ? 'CLOSE' : entrySelect.value;
+      $('h-rolling-exit').value = exitSelect.value;
+      $('h-rolling-units').value = $('h-units').value;
+      $('h-rolling-base-value').value = $('h-base-value').value;
+      $('h-rolling-base-volume').value = $('h-base-volume').value;
+      $('h-rolling-leg-value').value = $('h-leg-value').value;
+      $('h-rolling-leg-volume').value = $('h-leg-volume').value;
       const withData = codes.filter((code) => seriesByIns[code]?.length).length;
       setStatus(`تاریخچه ${fmt.int(withData)} از ${fmt.int(codes.length)} نماد آماده است.`);
     } catch (error) {
@@ -770,7 +863,7 @@ export async function mount(root, { state }) {
   }
 
   function showTradeDetail(entryDate, exitDate) {
-    const detail = replayTradeDetail(currentArgs, entryDate, exitDate);
+    const detail = replayTradeDetail(rollingArgs || currentArgs, entryDate, exitDate);
     const host = $('h-trade-detail');
     if (!detail.ok) { host.hidden = false; host.innerHTML = `<p class="empty-note">${esc(detail.error)}</p>`; return; }
     const { selected, best, worst, firstProfit, path } = detail;
@@ -805,6 +898,12 @@ export async function mount(root, { state }) {
     currentReplay = replay; currentArgs = args;
     $('h-results').hidden = false; exportBtn.disabled = false;
     $('h-selected-label').textContent = label || legs.map((l) => l.name).join(' · ');
+    renderFrozenStrategy(legs, replay, label);
+    if (!rollingCandidates.length) {
+      setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg) => leg.name || leg.ins).join(' + ')}` }], legs);
+    } else {
+      setRollingCandidates(rollingCandidates, legs);
+    }
     paintKpis(replay); paintStatistics(replay); paintDayTable(replay); paintContrib(replay);
     paintLegEvolution(replay); histogram($('h-distribution'), replay.rows);
     paintBasis(args); paintSensitivity(args, replay); paintMargin(replay); paintOptimal(args, replay);
@@ -819,6 +918,7 @@ export async function mount(root, { state }) {
     ]);
     lineChart($('h-dd-chart'), replay.rows, [{ key: 'drawdown', label: 'افت از قله', color: '#a81f32' }], { money: true });
     rollingResult = null;
+    rollingArgs = null;
     $('h-rolling-out').innerHTML = '';
     $('h-return-matrix').innerHTML = '<p class="empty-note">ابتدا «محاسبه ماتریس» را بزن.</p>';
     $('h-holding-profile').innerHTML = '<p class="empty-note">پس از محاسبه ماتریس ساخته می‌شود.</p>';
@@ -831,6 +931,10 @@ export async function mount(root, { state }) {
     $('h-combo-note').textContent = `${fmt.int(rows.length)} ترکیب معتبر · ${fmt.int(generated.noEntry)} فاقد قیمت ورود · ${fmt.int(generated.noLiquidity || 0)} حذف نقدشوندگی${generated.capped ? ' · سقف ترکیب اعمال شد' : ''}`;
     const sorted = [...rows].sort((a, b) => (b.summary.last?.returnPct ?? -Infinity) - (a.summary.last?.returnPct ?? -Infinity));
     autoRows = sorted;
+    setRollingCandidates(sorted.slice(0, 1000).map((row) => ({
+      legs: row.legs,
+      label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${row.legs.map((leg) => leg.name || leg.ins).join(' + ')} — اعمال ${row.strikes.map((strike) => fmt.int(strike)).join(' / ')} — ${fmt.pct(row.summary.last?.returnPct)}`,
+    })));
     $('h-combos').innerHTML = sorted.slice(0, 1000).map((r, index) => `<tr tabindex="0" data-combo="${index}">
       <td>${esc(r.legs.map((l) => l.name).join(' + '))}</td><td>${r.strikes.map((k) => fmt.int(k)).join(' · ')}</td><td>${r.expiries.map(historyDateLabel).join(' · ')}</td>
       <td class="${signTone(r.summary.last?.netPnl)}">${fmt.money(r.summary.last?.netPnl)}</td><td class="${signTone(r.summary.last?.returnPct)}">${fmt.pct(r.summary.last?.returnPct)}</td><td class="${signTone(r.summary.last?.baseCumulativePct)}">${fmt.pct(r.summary.last?.baseCumulativePct)}</td>
@@ -848,6 +952,9 @@ export async function mount(root, { state }) {
 
   function selectAutoCombo(combo) {
     selectedAuto = combo;
+    const selectedSignature = legSignature(combo.legs);
+    const rollingIndex = rollingCandidates.findIndex((item) => legSignature(item.legs) === selectedSignature);
+    if (rollingIndex >= 0) $('h-rolling-strategy').value = String(rollingIndex);
     [...$('h-combos').rows].forEach((row) => row.classList.toggle('selected', autoRows[Number(row.dataset.combo)] === combo));
     const baseline = replayHistory(argsFor(combo.legs, {}));
     if (!baseline.ok) { setStatus(baseline.error, true); return; }
@@ -866,9 +973,11 @@ export async function mount(root, { state }) {
         if (legs.length !== byId(strategySelect.value).legs.length) throw new Error('برای همه پاها قرارداد انتخاب نشده است');
         const manual = manualPrices();
         if (entrySelect.value === 'MANUAL' && Object.keys(manual).length !== legs.length) throw new Error('قیمت دستی ورود همه پاها را وارد کن');
+        setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg) => leg.name || leg.ins).join(' + ')}` }], legs);
         renderReplay(legs, manual);
       } else {
         if (entrySelect.value === 'MANUAL') throw new Error('در حالت تمام ترکیب‌ها ابتدا یکی از چهار قیمت تاریخی را انتخاب کن');
+        autoRows = []; selectedAuto = null; rollingArgs = null; rollingResult = null; setRollingCandidates([]);
         $('h-results').hidden = false;
         setStatus('در حال ساخت و ارزیابی ترکیب‌های تاریخی…');
         const response = await askWorker({
@@ -906,12 +1015,21 @@ export async function mount(root, { state }) {
     if (!currentArgs) return;
     const button = $('h-rolling'); button.disabled = true;
     $('h-rolling-out').innerHTML = '<p class="empty-note">در حال محاسبه…</p>';
-    const id = ++seq;
-    const response = await new Promise((resolve) => {
-      rollingResolve = { id, resolve };
-      ensureHistoryWorker().postMessage({ type: 'rolling', id, args: currentArgs });
-    });
-    button.disabled = false;
+    let response;
+    try {
+      rollingArgs = rollingArgsForSelection();
+      const id = ++seq;
+      response = await new Promise((resolve) => {
+        rollingResolve = { id, resolve };
+        ensureHistoryWorker().postMessage({ type: 'rolling', id, args: rollingArgs });
+      });
+    } catch (error) {
+      $('h-rolling-out').textContent = error.message;
+      setStatus(error.message, true);
+      return;
+    } finally {
+      button.disabled = false;
+    }
     if (response.error) { $('h-rolling-out').textContent = response.error; return; }
     const result = response.result;
     rollingResult = result;
@@ -923,6 +1041,8 @@ export async function mount(root, { state }) {
     const max = Math.max(...vals, 1);
     $('h-rolling-out').innerHTML = `<table class="rolling-table"><thead><tr><th>ورود \ آفست</th>${shown.map((d) => `<th title="${historyDateLabel(d)}">${historyDateLabel(d).slice(5)}</th>`).join('')}</tr></thead><tbody>${shown.map((entry) => `<tr><th>${historyDateLabel(entry)}</th>${shown.map((exit) => { const c = map.get(`${entry}|${exit}`); return `<td style="background:${heatColor(c?.returnPct, max)}" title="${c ? `${historyDateLabel(entry)} تا ${historyDateLabel(exit)}: ${fmt.pct(c.returnPct)} · ${fmt.money(c.netPnl)}` : 'فاقد داده'}">${c ? fmt.pct(c.returnPct) : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table>`;
     renderReturnMatrix(); renderHoldingProfile();
+    $('h-trade-detail').hidden = true;
+    setStatus(`ماتریس با ورود ${basisName(rollingArgs.entryBasis)} و خروج ${basisName(rollingArgs.exitBasis)} آماده شد.`);
   }
 
   baseSelect.addEventListener('change', () => {
@@ -933,6 +1053,12 @@ export async function mount(root, { state }) {
   modeSelect.addEventListener('change', () => { $('h-legs-card').hidden = modeSelect.value !== 'manual' || !dates.length; $('h-filter').disabled = modeSelect.value !== 'all'; if (modeSelect.value === 'all' && entrySelect.value === 'MANUAL') entrySelect.value = 'CLOSE'; buildLegControls(); });
   entrySelect.addEventListener('change', buildLegControls);
   $('h-start').addEventListener('input', paintRange); $('h-end').addEventListener('input', paintRange);
+  $('h-rolling-start').addEventListener('change', () => {
+    if (Number($('h-rolling-start').value) > Number($('h-rolling-end').value)) $('h-rolling-end').value = $('h-rolling-start').value;
+  });
+  $('h-rolling-end').addEventListener('change', () => {
+    if (Number($('h-rolling-end').value) < Number($('h-rolling-start').value)) $('h-rolling-start').value = $('h-rolling-end').value;
+  });
   loadBtn.addEventListener('click', loadHistory); runBtn.addEventListener('click', runAnalysis);
   exportBtn.addEventListener('click', exportCsv); $('h-rolling').addEventListener('click', renderRolling);
   $('h-payoff-day').addEventListener('input', renderDailyPayoff);

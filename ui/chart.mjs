@@ -264,7 +264,7 @@ export function payoffSvg(legs, netCash, opt = {}) {
  * نمودار قبلی برای همان موقعیت نابود و از نو ساخته می‌شود (اسکن پیوسته)
  * و کاربر وسط زوم یا پن بوده.
  */
-function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, readLabel, hint }) {
+function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, readLabel, hint, referenceValue = NaN }) {
   let lo = homeLo, hi = homeHi;
   const [initLo, initHi] = Array.isArray(initRange) ? initRange : [];
   if (Number.isFinite(initLo) && Number.isFinite(initHi) && initLo >= 0 && initHi - initLo > MIN_SPAN) {
@@ -275,6 +275,7 @@ function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, r
   host.innerHTML = `
     <div class="chart-box">
       <div class="chart-canvas" tabindex="0" role="group" aria-label="نمودار تعامل‌پذیر — فلش چپ و راست برای پیمایش، + و − برای زوم، Home برای نمای اول"></div>
+      <div class="chart-hover-tooltip" hidden></div>
       <div class="chart-tools">
         <span class="chart-read">${hint}</span>
         <span class="sp"></span>
@@ -286,6 +287,7 @@ function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, r
 
   const canvas = host.querySelector('.chart-canvas');
   const read = host.querySelector('.chart-read');
+  const tooltip = host.querySelector('.chart-hover-tooltip');
 
   function render() {
     geo = frameOf(lo, hi);
@@ -344,7 +346,7 @@ function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, r
       clampRange(drag.lo - dx, drag.hi - dx);
       return;
     }
-    showCursor(priceAt(ev));
+    showCursor(priceAt(ev), ev);
   };
   const onUp = (ev) => {
     drag = null;
@@ -353,7 +355,7 @@ function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, r
   };
 
   // ——— خط راهنما ———
-  function showCursor(S) {
+  function showCursor(S, ev = null) {
     const svg = canvas.querySelector('svg');
     const g = svg?.querySelector('.cursor');
     if (!g || !geo || !Number.isFinite(S)) return;
@@ -366,12 +368,27 @@ function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, r
     g.querySelector('.cur-x').setAttribute('x2', x);
     g.querySelector('.cur-dot').setAttribute('cx', x);
     g.querySelector('.cur-dot').setAttribute('cy', y);
+    const hasReference = Number.isFinite(referenceValue) && referenceValue > 0;
+    const distance = hasReference ? S - referenceValue : NaN;
+    const distancePct = hasReference ? (distance / referenceValue) * 100 : NaN;
+    const distanceHtml = hasReference
+      ? ` — فاصله از پایه روز <b style="color:${distance >= 0 ? 'var(--gain)' : 'var(--loss)'}">${money(distance)} (${fmt.pct(distancePct)})</b>`
+      : '';
     read.innerHTML = `پایه <b>${money(S)}</b> — ${readLabel} `
-      + `<b style="color:${v >= 0 ? 'var(--gain)' : 'var(--loss)'}">${money(v)}</b>`;
+      + `<b style="color:${v >= 0 ? 'var(--gain)' : 'var(--loss)'}">${money(v)}</b>${distanceHtml}`;
+    tooltip.hidden = false;
+    tooltip.innerHTML = `<span>قیمت روی نمودار <b>${money(S)}</b></span><span>${readLabel} <b class="${v >= 0 ? 'gain' : 'loss'}">${money(v)}</b></span>`
+      + (hasReference ? `<span>قیمت پایه روز <b>${money(referenceValue)}</b></span><span>فاصله از قیمت پایه <b class="${distance >= 0 ? 'gain' : 'loss'}">${money(distance)} · ${fmt.pct(distancePct)}</b></span>` : '');
+    if (ev) {
+      const box = host.querySelector('.chart-box').getBoundingClientRect();
+      tooltip.style.left = `${Math.min(Math.max(8, ev.clientX - box.left + 14), Math.max(8, box.width - 250))}px`;
+      tooltip.style.top = `${Math.max(8, ev.clientY - box.top - 28)}px`;
+    }
   }
   function hideCursor() {
     canvas.querySelector('.cursor')?.setAttribute('hidden', '');
     read.textContent = hint;
+    tooltip.hidden = true;
   }
 
   const reset = () => { lo = homeLo; hi = homeHi; render(); };
@@ -443,6 +460,7 @@ export function mountPayoff(host, legs, netCash, opt = {}) {
     valueAt: (S) => analysis.at(S),
     readLabel: 'سود و زیان',
     hint: PAYOFF_HINT,
+    referenceValue: opt.spot,
   });
   return { analysis, ...api };
 }
