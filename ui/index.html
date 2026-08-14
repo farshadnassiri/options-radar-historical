@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>رصد استراتژی آپشن</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
+<link rel="stylesheet" href="/ui/style.css">
+<!-- آیکون درون‌خطی: بدون آن مرورگر هر بار favicon.ico می‌خواهد و ۴۰۴ می‌گیرد -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b6e6b'/%3E%3Cpath d='M3 11.5 L6.5 8 L9 10 L13 4.5' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body data-theme="ledger">
+
+<header class="top">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">رصد استراتژی آپشن</span>
+    <span class="brand-sub">دفتر محاسبه، نه تابلوی تبلیغ</span>
+  </div>
+
+  <!-- نوار وضعیت فقط چیزی را نشان می‌دهد که کاربر بر اساسش تصمیم می‌گیرد:
+       بازار باز است؟ داده می‌رسد؟ آخرین بار کی رسید؟ خطایی هست؟
+       شمارنده‌های فنی حذف نشده‌اند، رفته‌اند پشت دکمه «جزئیات». -->
+  <div class="health" id="health" role="status" aria-live="polite">
+    <span class="pill" id="h-market">—</span>
+    <span class="pill link" id="h-link" title="وضعیت اتصال جریان داده">در حال اتصال</span>
+
+    <span class="metric" id="h-fresh-wrap" title="آخرین باری که داده تازه رسید">
+      <b id="h-fresh">—</b><i>آخرین دریافت</i>
+    </span>
+    <span class="metric" id="h-rows-wrap" title="تعداد قرارداد زیر نظر در عکس لحظه‌ای">
+      <b id="h-rows">—</b><i>قرارداد زیر نظر</i>
+    </span>
+    <span class="metric warn-metric" id="h-err-wrap" hidden>
+      <b id="h-err">۰</b><i>خطا</i>
+    </span>
+
+    <button class="ghost" id="detail-btn" aria-expanded="false" title="شمارنده‌های فنی">جزئیات</button>
+    <button class="ghost" id="theme-btn" title="پوسته">پوسته</button>
+  </div>
+</header>
+
+<div class="health-detail" id="health-detail" hidden>
+  <div><b id="d-req">—</b><i>درخواست بالادست</i></div>
+  <div><b id="d-cache">—</b><i>اصابت کش</i></div>
+  <div><b id="d-ms">—</b><i>تأخیر بالادست</i></div>
+  <div><b id="d-age">—</b><i>سن عکس سرور</i></div>
+  <div><b id="d-drops">—</b><i>قطعی اتصال</i></div>
+  <div class="wide"><b id="d-err">—</b><i>آخرین خطا</i></div>
+</div>
+
+<div class="shell">
+  <!-- فهرست استراتژی‌ها سمت راست است، همان سمتی که چشم در راست‌به‌چپ از آن شروع می‌کند -->
+  <nav class="rail" id="rail" aria-label="تب‌ها">
+    <div class="rail-search">
+      <input type="search" id="rail-q" placeholder="جست‌وجوی استراتژی… ( / )" autocomplete="off" aria-label="جست‌وجوی استراتژی">
+      <span class="rail-count" id="rail-count"></span>
+    </div>
+    <div class="rail-list" id="rail-list"></div>
+  </nav>
+
+  <main class="stage" id="stage">
+    <div class="empty">
+      <h1>هیچ تبی باز نیست</h1>
+      <p>از ستون کنار، یک تب را انتخاب کن. تب‌ها تا باز نشوند نه داده می‌گیرند نه محاسبه می‌کنند.</p>
+    </div>
+  </main>
+</div>
+
+<script type="module" src="/ui/app.mjs"></script>
+</body>
+</html>

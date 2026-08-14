@@ -1,0 +1,834 @@
+/* ————————————————————————————————————————————————
+   دو پوسته: «دفتر» روشن برای کار طولانی، «تابلو» تیره برای ساعت بازار.
+   رنگ‌ها فقط از همین متغیرها می‌آیند تا افزودن پوسته سوم یک بلوک باشد.
+   ———————————————————————————————————————————————— */
+
+:root {
+  --ground: #edf0f4;
+  --panel: #ffffff;
+  --panel-2: #f6f8fa;
+  --line: #d2d9e2;
+  --line-soft: #e6ebf1;
+  --ink: #16202c;
+  --ink-2: #4b5a6b;
+  /* پیش‌تر #7f8c9b — نسبت کنتراست فقط ۳٫۴۳:۱ روی --panel و ۳٫۲۲:۱ روی
+     --panel-2 داشت، زیر آستانه ۴٫۵:۱ متن معمولی WCAG AA، درست همان‌جایی
+     که برچسب کارت KPI و عدد محور و متن‌های ریز دیگر رویش می‌نشینند. */
+  --muted: #5f6b78;
+  --accent: #0b6e6b;
+  --accent-soft: #d8ebea;
+  --accent-2: #2c3e8f;
+  --gain: #12734e;
+  --gain-soft: #dff0e6;
+  --loss: #a81f32;
+  --loss-soft: #fadfe2;
+  --warn: #8a5a00;
+  --warn-soft: #fbf0d6;
+  /* منحنی‌های اضافه روی نمودار — نامزد رول، یا موقعیت مقایسه‌ای */
+  --cmp1: #6a4fa0;
+  --cmp2: #b5651d;
+  --cmp3: #1f6f8b;
+  --cmp4: #5c7a29;
+  --shadow: 0 1px 2px rgba(22, 32, 44, .06), 0 8px 24px rgba(22, 32, 44, .05);
+  --radius: 6px;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --sans: Vazirmatn, "IRANSans", "Segoe UI", Tahoma, system-ui, sans-serif;
+}
+
+body[data-theme="board"] {
+  --ground: #0d151e;
+  --panel: #14202c;
+  --panel-2: #182634;
+  --line: #26353f;
+  --line-soft: #1e2c39;
+  --ink: #e3eaf1;
+  --ink-2: #b3c2cf;
+  --muted: #8397a8;
+  --accent: #37b3ac;
+  --accent-soft: #10312f;
+  --accent-2: #7f92d8;
+  --gain: #43c389;
+  --gain-soft: #102c22;
+  --loss: #e8637a;
+  --loss-soft: #33141c;
+  --warn: #d9a13a;
+  --warn-soft: #322614;
+  --cmp1: #b79cf2;
+  --cmp2: #e0a15c;
+  --cmp3: #5fb8d6;
+  --cmp4: #a9c96e;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .3);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--ground); color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px; line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+b, strong { font-weight: 700; }
+code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ——— نوار بالا ——— */
+.top {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 18px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand-mark {
+  width: 10px; height: 22px; border-radius: 2px; align-self: center;
+  background: linear-gradient(180deg, var(--accent) 0 55%, var(--accent-2) 55% 100%);
+}
+.brand-name { font-weight: 800; letter-spacing: -.4px; font-size: 17px; }
+.brand-sub { color: var(--muted); font-size: 12px; white-space: nowrap; }
+@media (max-width: 900px) { .brand-sub { display: none; } }
+
+.health { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.metric { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.metric b { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+.metric i { font-style: normal; font-size: 10px; color: var(--muted); }
+/* داده کهنه باید به چشم بیاید، وگرنه ساعتِ ثابت شبیه ساعتِ درست است */
+.metric b[data-stale] { color: var(--warn); }
+.metric b[data-stale]::after { content: " ▲"; font-size: 9px; }
+.warn-metric b { color: var(--loss); }
+
+.pill {
+  padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2);
+}
+.pill.open { background: var(--gain-soft); border-color: var(--gain); color: var(--gain); }
+.pill.shut { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.pill.down { background: var(--loss-soft); border-color: var(--loss); color: var(--loss); }
+
+/* حباب اتصال: نقطه‌ای که در حالت زنده نبض می‌زند. حرکت، تنها چیزی است که
+   «الان دارد کار می‌کند» را بدون خواندن متن می‌رساند. */
+.pill.link { display: inline-flex; align-items: center; gap: 6px; }
+.pill.link::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; flex: none;
+}
+.pill.link.open::before { animation: pulse 1.8s ease-in-out infinite; }
+.pill.link.wait { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.pill.link.wait::before { animation: pulse .7s ease-in-out infinite; }
+.pill.link.idle { color: var(--muted); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pill.link::before { animation: none !important; } }
+
+/* شمارنده‌های فنی — حذف نشده‌اند، فقط پیش‌فرض بسته‌اند */
+.health-detail {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px 18px; padding: 12px 22px;
+  background: var(--panel-2); border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.health-detail > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.health-detail .wide { grid-column: 1 / -1; }
+.health-detail b { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-detail i { font-style: normal; font-size: 10.5px; color: var(--muted); }
+
+/* ——— قالب ———
+   فهرست سمت راست است: در راست‌به‌چپ، ستون اول شبکه همان سمت راست است و
+   چشم از همان‌جا شروع می‌کند. مرز جداکننده هم روی لبه رو به متن می‌نشیند. */
+.shell { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 46px); }
+.rail {
+  border-inline-end: 1px solid var(--line);
+  background: var(--panel); padding: 0 0 40px;
+  position: sticky; top: 46px; align-self: start;
+  max-height: calc(100vh - 46px); overflow: auto; overscroll-behavior: contain;
+}
+
+.rail-search {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 12px 10px;
+  background: var(--panel); border-bottom: 1px solid var(--line-soft);
+}
+.rail-search input {
+  flex: 1; min-width: 0;
+  background: var(--panel-2); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 7px 13px; font: inherit; font-size: 13.5px;
+}
+.rail-search input:focus { border-color: var(--accent); outline: none; }
+.rail-search input::-webkit-search-cancel-button { cursor: pointer; }
+.rail-count { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+
+.rail-list { padding: 8px 8px 0; }
+.rail-none { padding: 18px 10px; color: var(--muted); font-size: 12.5px; text-align: center; }
+
+.rail-group { margin-bottom: 4px; }
+.rail-head {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 6px 8px; margin: 6px 0 2px;
+  background: none; border: 0; border-radius: var(--radius);
+  color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; text-align: start; cursor: pointer;
+}
+.rail-head:hover { color: var(--ink-2); background: var(--panel-2); }
+.rail-head .caret {
+  width: 0; height: 0; flex: none;
+  border-block: 4px solid transparent;
+  border-inline-end: 5px solid currentColor;
+  transition: transform .15s ease;
+}
+.rail-head-name { flex: 1; min-width: 0; }
+.rail-head-n {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0;
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: 999px; padding: 0 6px;
+}
+.rail-group[data-folded="0"] .caret { transform: rotate(-90deg); }
+.rail-group[data-folded="1"] .rail-items { display: none; }
+
+/* دو سطری: نام در سطر اول با قلم درشت‌تر، و سطر دوم برای نشان شکل بازده و
+   برچسب‌های کوتاه. سطر دوم کم‌رنگ است تا نام همچنان اول خوانده شود. */
+.tab-btn {
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%;
+  padding: 8px 11px; margin-bottom: 2px;
+  background: none; border: 0; border-radius: var(--radius);
+  color: var(--ink-2); font: inherit; font-size: 14.5px; text-align: start; cursor: pointer;
+  position: relative; transition: background .12s ease, color .12s ease;
+}
+.tab-btn:hover { background: var(--panel-2); color: var(--ink); }
+.tab-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tab-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+.tab-btn[aria-current="true"] {
+  background: var(--accent-soft); color: var(--accent); font-weight: 700;
+}
+/* نشانگر انتخاب روی لبه رو به فهرست می‌نشیند، پس در راست‌به‌چپ سمت راست است */
+.tab-btn[aria-current="true"]::before {
+  content: ""; position: absolute; inset-inline-start: 0; inset-block: 4px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-btn .phase {
+  flex: none; font-family: var(--mono); font-size: 10.5px;
+  color: var(--muted); background: var(--panel-2);
+  border: 1px solid var(--line-soft); border-radius: 3px; padding: 0 4px;
+}
+.tab-btn .tab-flag { flex: none; color: var(--warn); font-weight: 700; }
+.tab-btn .tone {
+  flex: none; font-size: 10.5px; font-weight: 700; padding: 0 6px;
+  border-radius: 999px; border: 1px solid transparent; line-height: 1.6;
+}
+.tone.up { background: var(--gain-soft); color: var(--gain); border-color: var(--gain); }
+.tone.down { background: var(--loss-soft); color: var(--loss); border-color: var(--loss); }
+.tone.flat { background: var(--panel-2); color: var(--muted); border-color: var(--line); }
+.tone.vol { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.tab-btn[data-locked="1"] { color: var(--muted); }
+
+/* برجستگی صفحه‌کلید (بالا/پایین در جست‌وجوی فهرست)، جدا از تب باز */
+.tab-btn[data-kbd-active="1"]:not([aria-current="true"]) {
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.stage { padding: 20px 22px 60px; min-width: 0; }
+@media (max-width: 820px) {
+  .shell { grid-template-columns: 1fr; }
+  .rail {
+    position: static; max-height: none;
+    border-inline-end: 0; border-bottom: 1px solid var(--line);
+  }
+}
+
+/* ——————————————————————— تحلیل تاریخی ——————————————————————— */
+.history-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 16px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--panel)), var(--panel));
+}
+.history-hero h1 { margin: 2px 0 8px; font-size: clamp(24px, 3vw, 38px); }
+.history-hero p { max-width: 820px; margin: 0; color: var(--muted); line-height: 1.9; }
+.history-local {
+  flex: none;
+  padding: 7px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.eyebrow { margin: 0; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.history-controls { margin-bottom: 14px; }
+.history-control-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+}
+.history-liquidity-controls {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.35fr) repeat(4, minmax(145px, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+}
+.history-liquidity-controls label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.history-liquidity-controls input {
+  width: 100%; min-height: 38px; padding: 7px 9px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel-2); color: var(--ink); font: inherit;
+}
+.history-control-grid label,
+.history-range label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.history-expiry-field { display: grid; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 700; position: relative; }
+.history-expiry-field details { position: relative; }
+.history-expiry-field summary {
+  min-height: 40px; display: flex; align-items: center; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2);
+  color: var(--ink); cursor: pointer; list-style-position: inside;
+}
+.history-expiry-field summary.warn { color: var(--warn); border-color: var(--warn); }
+.expiry-picker-popover {
+  position: absolute; z-index: 12; inset-inline: 0; top: calc(100% + 5px);
+  padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); box-shadow: var(--shadow); min-width: 260px;
+}
+.expiry-picker-tools { display: flex; gap: 7px; margin-bottom: 8px; }
+.expiry-picker-list { display: grid; gap: 4px; max-height: 260px; overflow: auto; }
+.expiry-picker-list label { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 7px 6px; border-radius: 6px; cursor: pointer; }
+.expiry-picker-list label:hover { background: var(--panel-2); }
+.history-control-grid .expiry-picker-list input { width: auto; min-height: auto; padding: 0; border: 0; background: transparent; accent-color: var(--accent); }
+.expiry-picker-list small { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.history-control-grid select,
+.history-control-grid input,
+.history-leg select,
+.history-leg input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+}
+.history-control-grid select:focus,
+.history-control-grid input:focus,
+.history-leg select:focus,
+.history-leg input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px; }
+.history-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.history-actions #h-status { color: var(--muted); font-size: 12px; }
+.history-actions #h-status[data-error] { color: var(--loss); }
+.history-caveat { margin: 13px 0 0; padding-top: 12px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 12px; }
+.history-range { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; margin-bottom: 14px; }
+.range-head { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+.range-head h2 { margin: 0; }
+.range-head b { color: var(--accent); }
+.history-range input[type="range"] { width: 100%; accent-color: var(--accent); }
+.base-liquidity-snapshot {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2); color: var(--muted); font-size: 12px;
+}
+.base-liquidity-snapshot b { color: var(--ink); }
+.base-liquidity-snapshot small { flex-basis: 100%; color: var(--warn); }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.section-head h2, .section-head h3, .section-head p { margin: 0; }
+.section-head > span { color: var(--muted); font-size: 12px; }
+.history-leg-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 12px; }
+.history-leg { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
+.history-leg > span { color: var(--muted); font-size: 12px; }
+.history-auto-manual { margin-top: 14px; padding: 14px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.history-auto-manual > button { margin-top: 12px; }
+.history-kpis { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+.history-kpi { min-height: 82px; padding: 13px 14px; border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: 12px; background: var(--panel); }
+.history-kpi span { display: block; margin-bottom: 9px; color: var(--muted); font-size: 11px; }
+.history-kpi b { font-size: 14px; line-height: 1.7; }
+.history-kpi.gain { border-top-color: var(--gain); }
+.history-kpi.loss { border-top-color: var(--loss); }
+.history-chart-grid,
+.history-analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
+.history-chart { min-height: 220px; overflow: hidden; }
+.history-svg { display: block; width: 100%; min-width: 520px; height: auto; overflow: visible; }
+.history-svg text { fill: var(--muted); font-family: inherit; font-size: 10px; }
+.chart-zero { stroke: var(--line-strong, var(--line)); stroke-width: 1; stroke-dasharray: 4 4; }
+.scatter-gain { fill: color-mix(in srgb, var(--gain) 70%, transparent); }
+.scatter-loss { fill: color-mix(in srgb, var(--loss) 70%, transparent); }
+.history-table-wrap { width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.history-table { width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.history-table th,
+.history-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); border-left: 1px solid color-mix(in srgb, var(--line) 65%, transparent); text-align: right; white-space: nowrap; }
+.history-table th { position: sticky; top: 0; z-index: 1; background: var(--panel-2); color: var(--muted); font-size: 11px; }
+.history-table tbody tr:last-child td { border-bottom: 0; }
+.history-table tbody tr[data-combo] { cursor: pointer; }
+.history-table tbody tr[data-combo]:hover,
+.history-table tbody tr[data-combo]:focus { background: color-mix(in srgb, var(--accent) 8%, transparent); outline: none; }
+.history-table tbody tr[data-combo].selected { background: color-mix(in srgb, var(--accent) 15%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
+.history-sort {
+  width: 100%; display: inline-flex; align-items: center; justify-content: space-between; gap: 7px;
+  padding: 0; border: 0; background: transparent; color: inherit; font: inherit;
+  font-weight: inherit; white-space: nowrap; cursor: pointer; text-align: inherit;
+}
+.history-sort::after { content: "↕"; color: var(--muted); font-size: 11px; opacity: .65; }
+.history-table th[aria-sort="ascending"] .history-sort::after { content: "↑"; color: var(--accent); opacity: 1; }
+.history-table th[aria-sort="descending"] .history-sort::after { content: "↓"; color: var(--accent); opacity: 1; }
+.history-sort:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 3px; }
+.history-table td small,
+.history-table td b { display: block; }
+.history-table td small { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.history-table .gain, .leg-contrib .gain { color: var(--gain); }
+.history-table .loss, .leg-contrib .loss { color: var(--loss); }
+.history-missing { color: var(--muted); background: color-mix(in srgb, var(--muted) 6%, transparent); }
+.history-liquidity { color: var(--muted); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.history-table tbody tr:has(td:last-child:not(:empty)) td:last-child { max-width: 260px; }
+.history-histogram {
+  height: 220px; display: flex; direction: ltr; align-items: end; gap: 6px;
+  padding: 24px 12px 34px; border-bottom: 1px solid var(--line); position: relative;
+}
+.hist-bin { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 4px; position: relative; }
+.hist-bin b { width: min(42px, 86%); min-height: 5px; border-radius: 5px 5px 1px 1px; background: var(--muted); }
+.hist-bin.gain b { background: var(--gain); }
+.hist-bin.loss b { background: var(--loss); }
+.hist-bin span { font-size: 10px; font-weight: 700; }
+.hist-bin small { position: absolute; top: calc(100% + 7px); color: var(--muted); font-size: 9px; white-space: nowrap; transform: rotate(-25deg); }
+.margin-summary { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 8px; padding: 10px; }
+.margin-summary div { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.margin-summary span { display: block; color: var(--muted); font-size: 10px; margin-bottom: 5px; }
+.optimal-observed, .optimal-policy { padding: 12px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.optimal-observed { border-inline-start: 3px solid var(--gain); }
+.optimal-policy { border-inline-start: 3px solid var(--accent); }
+.optimal-observed > span, .optimal-policy > span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.optimal-observed ul { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 5px; }
+.optimal-observed li { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+.optimal-policy p { margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.8; }
+#h-optimal { overflow: auto; }
+.leg-contrib { display: grid; gap: 10px; }
+.leg-contrib > div { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.leg-contrib small { grid-column: 1 / -1; color: var(--muted); }
+.rolling-wrap { max-height: 580px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.rolling-table { border-collapse: separate; border-spacing: 1px; min-width: 100%; font-size: 9px; }
+.rolling-table th { position: sticky; top: 0; z-index: 2; padding: 5px; background: var(--panel-2); color: var(--muted); white-space: nowrap; }
+.rolling-table tbody th { right: 0; z-index: 1; }
+.rolling-table td { min-width: 48px; height: 28px; padding: 2px; text-align: center; color: var(--ink); }
+.empty-note { color: var(--muted); text-align: center; padding: 28px 12px; }
+
+@media (max-width: 1100px) {
+  .history-control-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+  .history-liquidity-controls { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+  .history-liquidity-controls > div { grid-column: 1 / -1; }
+  .history-kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .history-hero { display: block; }
+  .history-local { display: inline-block; margin-top: 14px; }
+  .history-control-grid,
+  .history-liquidity-controls,
+  .history-range,
+  .history-leg-grid,
+  .history-chart-grid,
+  .history-analysis-grid { grid-template-columns: 1fr; }
+  .history-liquidity-controls > div { grid-column: auto; }
+  .range-head { align-items: flex-start; flex-direction: column; }
+  .history-kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+  .history-svg { min-width: 480px; }
+}
+
+.empty { max-width: 460px; margin: 12vh auto; text-align: center; color: var(--muted); }
+.empty h1 { font-size: 20px; color: var(--ink); margin-bottom: 6px; }
+
+/* ——— اجزای مشترک ——— */
+.page-head { margin-bottom: 18px; }
+.page-head h2 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -.4px; }
+.page-head p { margin: 4px 0 0; color: var(--muted); max-width: 74ch; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 16px; margin-bottom: 16px;
+}
+.card > h3 {
+  margin: 0 0 2px; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+}
+.card > h3 .scope {
+  font-family: var(--mono); font-size: 10px; font-weight: 500; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+}
+.card > .note { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; }
+
+/* ——— تب تنظیمات: نوار پرش و سلسله‌مراتب تایپوگرافی ——— */
+.settings-nav {
+  position: sticky; top: 46px; z-index: 5;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 10px; margin-bottom: 16px;
+  background: color-mix(in srgb, var(--ground) 88%, transparent);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+}
+.settings-card { scroll-margin-top: 108px; }
+.settings-card > h3 {
+  font-size: 15px; padding-inline-start: 10px;
+  border-inline-start: 3px solid var(--accent);
+}
+.grid { display: grid; gap: 12px 18px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
+.field .hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.field input, .field select {
+  background: var(--panel-2); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 6px 8px; font: inherit; font-size: 13px; width: 100%;
+  transition: border-color .12s ease;
+}
+.field input[type="number"] { font-family: var(--mono); direction: ltr; text-align: start; }
+.field input:focus, .field select:focus { border-color: var(--accent); }
+.field.row { flex-direction: row; align-items: center; gap: 8px; }
+.field.row input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+.unit { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+
+.num-ctl { display: flex; align-items: center; gap: 4px; }
+.num-ctl input[type="number"] { text-align: center; }
+.step-btn {
+  flex: none; width: 26px; height: 28px; padding: 0;
+  background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 4px;
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+.step-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.step-btn:active { filter: brightness(.94); }
+.num-range { width: 100%; margin-top: 2px; accent-color: var(--accent); }
+
+.scan-progress {
+  height: 4px; margin-top: 10px; border-radius: 2px; overflow: hidden;
+  background: var(--line-soft);
+}
+.scan-progress-fill {
+  height: 100%; width: 0%; background: var(--accent);
+  transition: width .25s ease, opacity .25s ease;
+}
+
+.btn {
+  background: var(--accent); color: #fff; border: 0; border-radius: 4px;
+  padding: 8px 16px; font: inherit; font-weight: 700; font-size: 13px; cursor: pointer;
+  transition: filter .12s ease;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:active { filter: brightness(.92); }
+.btn:disabled { opacity: .6; cursor: not-allowed; filter: none; }
+.btn.sec { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); }
+.ghost {
+  background: none; border: 1px solid var(--line); color: var(--ink-2);
+  border-radius: 4px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.ghost:hover { border-color: var(--accent); color: var(--accent); }
+.ghost:active { background: var(--accent-soft); }
+.ghost[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.ghost:disabled { opacity: .6; cursor: not-allowed; }
+.ghost:disabled:hover { border-color: var(--line); color: var(--ink-2); }
+.bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bar .sp { flex: 1; }
+.saved { color: var(--gain); font-size: 12px; font-weight: 600; }
+
+/* ——— جدول ——— */
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.data th, table.data td {
+  padding: 5px 8px; border-bottom: 1px solid var(--line-soft); text-align: start; white-space: nowrap;
+}
+table.data thead th {
+  position: sticky; top: 46px; background: var(--panel-2); z-index: 2;
+  font-size: 11px; font-weight: 700; color: var(--ink-2);
+  border-bottom: 1px solid var(--line); cursor: pointer; user-select: none;
+}
+table.data thead th:hover { color: var(--accent); }
+table.data tbody tr { transition: background .1s ease; }
+table.data tbody tr:hover { background: var(--panel-2); }
+/* ردیف نزدیک‌به‌پول دیده‌بان زنجیره (chain.mjs) قبلاً با style این‌لاین رنگ
+   می‌گرفت که همیشه بر :hover بالا می‌زد — هاور روی همان ردیف هیچ بازخوردی
+   نداشت، برخلاف بقیه ردیف‌های همان جدول. کلاس با اولویت برابر :hover را
+   شکست نمی‌دهد. */
+table.data tbody tr.atm { background: var(--accent-soft); }
+table.data tbody tr.atm:hover { background: var(--panel-2); }
+/* نامزد انتخاب‌شده جدول مقایسه رول (roll.mjs) — همان مشکل ردیف نزدیک‌به‌پول
+   دور ۲۴، این‌بار پیش‌گیرانه با کلاس نه style این‌لاین. */
+table.data tbody tr.picked { background: var(--accent-soft); }
+table.data tbody tr.picked:hover { background: var(--panel-2); }
+
+/* ردیف برجسته با فلش بالا/پایین (table.mjs) — .tbl-body خودش tabindex="0"
+   دارد، این فقط می‌گوید صفحه‌کلید الان کدام ردیف را می‌بیند. همان نشانه
+   inset که فهرست کناری (rail) برای برجستگی صفحه‌کلیدش دارد. */
+table.data tbody tr[data-kbd-active="1"] { box-shadow: inset 0 0 0 1px var(--accent); }
+table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; }
+
+.skel-row td { padding: 7px 8px; }
+.skel-bar {
+  display: block; height: 12px; border-radius: 3px; background: var(--line-soft);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.skel-row:nth-child(2n) .skel-bar { animation-delay: .15s; }
+@media (prefers-reduced-motion: reduce) { .skel-bar { animation: none; opacity: .6; } }
+.scroll { overflow: auto; max-height: 62vh; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+/* همان مشکل tbl-body: این جدول‌ها (دفتر بازه‌ها، رول، زنجیره، فهرست موقعیت‌ها)
+   قاب پیمایش خودشان را دارند، نه کل صفحه. top:46px قاعده عمومی برای سرستونی
+   است که زیر نوار بالای صفحه می‌چسبد؛ اینجا همان ۴۶ پیکسل سرستون را داخل قاب
+   پایین می‌انداخت و ردیف اول زیرش گم می‌شد. */
+.scroll table.data thead th { top: 0; }
+/* دیده‌بان زنجیره دو ردیف سرستون دارد (گروه خرید/فروش، بعد برچسب ستون‌ها).
+   اگر هر th مستقل بچسبد، هر دو ردیف روی هم سعی می‌کنند در همان top:0 بنشینند —
+   موقع اسکرول ردیف دوم روی اول می‌نشیند و ردیف اول از دید گم می‌شود. چسباندن
+   خودِ thead هر دو ردیف را یک واحد نگه می‌دارد. */
+#chain thead { position: sticky; top: 0; z-index: 2; }
+#chain thead th { position: static; }
+
+.tag {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  font-size: 11px; font-weight: 600; border: 1px solid transparent;
+}
+.tag.gain { background: var(--gain-soft); color: var(--gain); border-color: var(--gain); }
+.tag.loss { background: var(--loss-soft); color: var(--loss); border-color: var(--loss); }
+.tag.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.tag.flat { background: var(--panel-2); color: var(--muted); border-color: var(--line); }
+
+/* ——— نوار تشخیص ——— */
+.funnel { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--panel-2); margin: 10px 0 6px; }
+.funnel span { display: block; height: 100%; }
+.funnel-key { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); }
+.funnel-key i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-inline-end: 4px; }
+
+/* ——— شاخص‌های کلیدی ——— */
+.kpis { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); margin-bottom: 16px; }
+.kpi {
+  background: var(--panel); border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--line);
+  border-radius: var(--radius); padding: 10px 12px;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.kpi:hover { box-shadow: var(--shadow); }
+/* مرز رنگی سمت شروع، همان جهت سود/زیان کارت را از فاصله چشم می‌رساند،
+   بی‌آنکه رنگ‌آمیزی کل کارت ادعای اجرا یا داده کیفی دیگر را رنگ کند. */
+.kpi:has(.v.gain) { border-inline-start-color: var(--gain); }
+.kpi:has(.v.loss) { border-inline-start-color: var(--loss); }
+.kpi .k { font-size: 11px; color: var(--muted); }
+.kpi .v { font-family: var(--mono); font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; direction: ltr; }
+.kpi .v.gain { color: var(--gain); }
+.kpi .v.loss { color: var(--loss); }
+.kpi .s { font-size: 11px; color: var(--muted); }
+
+/* ——— نمودار بازده: امضای صفحه ——— */
+.payoff { width: 100%; height: auto; display: block; }
+.payoff .grid-line { stroke: var(--line-soft); stroke-width: 1; }
+.payoff .axis { stroke: var(--line); stroke-width: 1; }
+.payoff .zero { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
+.payoff .curve { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+.payoff .fill-gain { fill: var(--gain); opacity: .13; }
+.payoff .fill-loss { fill: var(--loss); opacity: .13; }
+.payoff .strike { stroke: var(--accent-2); stroke-width: 1; stroke-dasharray: 2 4; }
+.payoff .be { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
+.payoff .spot { stroke: var(--warn); stroke-width: 1.5; }
+.payoff path.curve-today { fill: none; stroke: var(--accent-2); stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
+.curve2-legend line.curve-today { stroke: var(--accent-2); stroke-width: 1.75; stroke-dasharray: 5 4; }
+.curve2-legend line.curve { stroke: var(--accent); stroke-width: 2.5; }
+
+/* منحنی‌های اضافه، هم‌زمان روی یک نمودار — نامزدهای دیگر رول روی نمودار
+   تفاضل، یا موقعیت‌های مقایسه‌ای روی نمودار بازده. رنگ و الگوی خط‌چین هر دو
+   جدا، چون شناسه هرگز فقط رنگ نیست — legend اسم را هم می‌گوید. */
+.payoff path.curve-extra1 { fill: none; stroke: var(--cmp1); stroke-width: 1.75; stroke-dasharray: 4 3; opacity: .85; }
+.payoff path.curve-extra2 { fill: none; stroke: var(--cmp2); stroke-width: 1.75; stroke-dasharray: 1 3; stroke-linecap: round; opacity: .85; }
+.payoff path.curve-extra3 { fill: none; stroke: var(--cmp3); stroke-width: 1.75; stroke-dasharray: 7 3; opacity: .85; }
+.payoff path.curve-extra4 { fill: none; stroke: var(--cmp4); stroke-width: 1.75; stroke-dasharray: 2 2 6 2; opacity: .85; }
+.curve2-legend line.curve-extra1 { stroke: var(--cmp1); stroke-width: 1.75; stroke-dasharray: 4 3; }
+.curve2-legend line.curve-extra2 { stroke: var(--cmp2); stroke-width: 1.75; stroke-dasharray: 1 3; }
+.curve2-legend line.curve-extra3 { stroke: var(--cmp3); stroke-width: 1.75; stroke-dasharray: 7 3; }
+.curve2-legend line.curve-extra4 { stroke: var(--cmp4); stroke-width: 1.75; stroke-dasharray: 2 2 6 2; }
+
+/* فهرست تیک موقعیت‌های مقایسه‌ای زیر نمودار بازده */
+.cmp-list { display: flex; flex-direction: column; gap: 2px; max-height: 150px; overflow-y: auto; }
+.cmp-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 4px 6px; border-radius: 4px; cursor: pointer; }
+.cmp-row:hover { background: var(--panel-2); }
+.cmp-row input { accent-color: var(--accent); flex: none; }
+.cmp-row input:disabled { accent-color: var(--muted); }
+.cmp-row:has(input:disabled) { color: var(--muted); cursor: not-allowed; }
+/* عدد محور باید چپ‌به‌راست خوانده شود، وگرنه در صفحه راست‌به‌چپ علامت منفی
+   به انتهای عدد می‌پرد و «−۴۰M» به شکل «۴۰M−» دیده می‌شود. */
+/* برچسب محور «−۴۱ م» هم رقم دارد هم واژه فارسی. جهت پاراگراف چپ‌به‌راست
+   لازم است تا نشانه منفی جلوی عدد بماند، ولی «bidi-override» واژه فارسی را
+   حرف‌به‌حرف وارونه می‌کرد. «isolate» جهت را می‌بندد بی‌آنکه دستور دوسویه
+   داخل رشته را زیر پا بگذارد. */
+.payoff text { font-family: var(--mono); font-size: 10px; fill: var(--muted); direction: ltr; unicode-bidi: isolate; }
+.payoff text.lbl { font-family: var(--sans); font-size: 10.5px; unicode-bidi: plaintext; }
+.payoff text.strike-lbl { font-family: var(--mono); font-size: 9.5px; fill: var(--accent-2); }
+
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+
+/* ——— نمودار تعامل‌پذیر ——— */
+.chart-box { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+.chart-canvas { cursor: crosshair; touch-action: none; }
+.chart-canvas.dragging { cursor: grabbing; }
+.chart-canvas .payoff { user-select: none; }
+.chart-tools {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border-top: 1px solid var(--line); background: var(--panel-2);
+  font-size: 11.5px; color: var(--muted);
+}
+.chart-tools .sp { flex: 1; }
+.chart-tools .ghost { padding: 2px 9px; font-family: var(--mono); }
+.chart-read b { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
+.payoff .cur-x { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 2 3; opacity: .7; }
+.payoff .cur-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 11px; font-size: 12px; cursor: pointer; color: var(--ink-2); font: inherit;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.chip:hover:not([aria-pressed="true"]) { border-color: var(--accent); color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 12.5px; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; text-align: start; }
+
+/* ——— جدول مجازی‌سازی‌شده ———
+   سرستون باید روی لبه بالای همین قاب پیمایش بچسبد. قاعده عمومی
+   `table.data thead th` مشخصیت بالاتری داشت و top آن ۴۶ پیکسل بود — همان
+   فاصله نوار بالای صفحه — پس سرستون این جدول ۴۶ پیکسل پایین‌تر می‌افتاد و
+   دو ردیف اول زیرش پنهان می‌شد. انتخابگر اینجا با نام جدول بالا برده شده
+   تا مشخصیتش قطعی باشد. */
+.tbl-wrap { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+.tbl-body table.data { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+.tbl-body table.data thead th {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--panel-2); padding: 7px 8px;
+  font-size: 11px; font-weight: 700; color: var(--ink-2);
+  white-space: nowrap; cursor: pointer; user-select: none;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 var(--line);
+}
+.tbl-body table.data thead th:hover { color: var(--accent); background: var(--panel); }
+.tbl-body table.data thead th[data-sorted="desc"]::after { content: " ↓"; color: var(--accent); }
+.tbl-body table.data thead th[data-sorted="asc"]::after { content: " ↑"; color: var(--accent); }
+.tbl-body table.data thead th[data-sorted="desc"],
+.tbl-body table.data thead th[data-sorted="asc"] { color: var(--accent); }
+.tbl-body { overflow: auto; height: 56vh; position: relative; }
+
+/* ——— نوار ابزار جدول و انتخابگر ستون ——— */
+/* ——— جابه‌جایی ستون با کشیدن ——— */
+.tbl-body table.data thead th { cursor: grab; user-select: none; }
+.tbl-body table.data thead th:active { cursor: grabbing; }
+.tbl-body table.data thead th.dragging { opacity: .4; }
+/* مقصد انداختن، روی لبه رو به کاربر خط می‌گیرد تا معلوم باشد کجا می‌نشیند */
+.tbl-body table.data thead th.drop-into {
+  background: var(--accent-soft); color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tbl-tools {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  border-bottom: 1px solid var(--line); background: var(--panel-2);
+  font-size: 11.5px; color: var(--muted);
+}
+.tbl-tools .sp { flex: 1; }
+.tbl-cols-btn b { font-family: var(--mono); font-size: 10.5px; font-weight: 500; }
+
+.col-panel { border-bottom: 1px solid var(--line); background: var(--panel); padding: 10px 12px 12px; }
+.col-panel-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--muted); margin-bottom: 10px;
+}
+.col-panel-head .sp { flex: 1; }
+.col-groups { display: grid; gap: 10px 18px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.col-group h5 {
+  margin: 0 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .1em;
+  color: var(--muted); text-transform: uppercase;
+}
+.col-opt {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 4px; border-radius: 4px; font-size: 12.5px; cursor: pointer;
+}
+.col-opt:hover { background: var(--panel-2); }
+.col-opt input { accent-color: var(--accent); }
+.col-opt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tbl-body td { padding: 4px 8px; font-size: 12.5px; white-space: nowrap; border-bottom: 1px solid var(--line-soft); }
+/* رنگ سلول عددی منفی — قبلاً style این‌لاین بود که همیشه بر .stale td
+   (زیر) برنده می‌شد، دقیقاً همان مشکل دورهای ۲۴/۳۰؛ اینجا با کلاس، سلول
+   زیانِ همان ردیفی که کاربر باید کمتر از همه بهش اعتماد کند (مظنه کهنه)
+   درست خاکستری می‌ماند، نه قرمز عادی. */
+.tbl-body td.neg { color: var(--loss); }
+.tbl-body tr { height: 27px; cursor: pointer; }
+.tbl-body tr:hover td { background: var(--panel-2) !important; }
+.tbl-body tr.unexec td { opacity: .55; font-style: italic; }
+.tbl-body tr.risky td:first-child { box-shadow: inset 3px 0 0 var(--loss); }
+.tbl-body tr.soon td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.tbl-body tr.stale td { color: var(--muted); }
+/* نشان «تغییر کرد» اسکن پیوسته (table.mjs → changedIds): ردیفی که مبنای
+   رتبه‌بندی‌اش نسبت به تیک قبلی عوض شده، یک‌بار پررنگ می‌شود و محو می‌رود —
+   بدون این، تغییر رتبه وسط اسکن زنده گم می‌شد. */
+@keyframes row-flash { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+.tbl-body tr.flash { animation: row-flash 1.6s ease-out; }
+@media (prefers-reduced-motion: reduce) { .tbl-body tr.flash { animation: none; background: var(--accent-soft); } }
+.tbl-foot {
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+  border-top: 1px solid var(--line); background: var(--panel-2);
+  font-size: 11.5px; color: var(--muted);
+}
+.tbl-foot .sp { flex: 1; }
+
+/* ——— انتخابگر نماد ——— */
+.picker { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.picker-tools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.picker-tools input[type="search"] {
+  flex: 1; min-width: 140px;
+  background: var(--panel-2); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 5px 8px; font: inherit; font-size: 13px;
+  transition: border-color .12s ease;
+}
+.picker-tools input[type="search"]:focus { border-color: var(--accent); outline: none; }
+.picker-list {
+  max-height: 260px; overflow: auto; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--panel-2);
+}
+.picker-row {
+  display: grid; grid-template-columns: 22px 1fr auto auto auto; gap: 8px; align-items: center;
+  padding: 4px 8px; font-size: 12.5px; border-bottom: 1px solid var(--line-soft); cursor: pointer;
+}
+.picker-row:hover { background: var(--panel); }
+.picker-row[aria-selected="true"] { background: var(--accent-soft); }
+.picker-row input { accent-color: var(--accent); }
+.picker-row .m { font-family: var(--mono); font-size: 11px; color: var(--muted); direction: ltr; }
+.picker-sum { font-size: 12px; color: var(--muted); }
+
+/* ——— پانل جزئیات ——— */
+.detail { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; }
+@media (max-width: 1100px) { .detail { grid-template-columns: 1fr; } }
+.mini { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mini td, .mini th { padding: 3px 6px; border-bottom: 1px solid var(--line-soft); text-align: start; }
+.mini th { color: var(--muted); font-weight: 600; font-size: 11px; }
+.mini td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; }
+.split { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+/* راهنمای نوار تشخیص — وقتی جدول خالی است، شمردن کافی نیست */
+.funnel-hint {
+  margin: 8px 0 0; padding: 8px 10px;
+  background: var(--warn-soft); border: 1px solid var(--warn);
+  border-radius: 4px; font-size: 12.5px; color: var(--ink-2); line-height: 1.7;
+}

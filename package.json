@@ -1,0 +1,12 @@
+{
+  "name": "options-radar",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "description": "رصد استراتژی آپشن — سرور محلی و موتور محاسبه",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server/server.mjs",
+    "test": "node tests/run.mjs"
+  }
+}
