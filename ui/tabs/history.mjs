@@ -4,8 +4,10 @@ import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, flattenActiveContracts, historyDateLabel, historyDayName,
   replayHistory, basisMatrix, entrySensitivity, optimizeExitPolicy, normalizeHistoryDate,
+  holdingPeriodProfile, replayTradeDetail,
 } from '/core/history.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa } from '/ui/fmt.mjs';
+import { mountPayoff } from '/ui/chart.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -70,7 +72,7 @@ function histogram(host, rows) {
   const bins = Array.from({ length: count }, (_, i) => ({ lo: lo + i * width, hi: i === count - 1 ? hi : lo + (i + 1) * width, n: 0 }));
   values.forEach((v) => { bins[Math.min(count - 1, Math.floor((v - lo) / width))].n += 1; });
   const max = Math.max(...bins.map((b) => b.n), 1);
-  host.innerHTML = `<div class="history-histogram">${bins.map((b) => `<div class="hist-bin ${b.hi <= 0 ? 'loss' : b.lo >= 0 ? 'gain' : 'flat'}" title="${fmt.pct(b.lo)} تا ${fmt.pct(b.hi)}: ${fmt.int(b.n)} روز"><b style="height:${Math.max(5, (b.n / max) * 100)}%"></b><span>${fmt.int(b.n)}</span><small>${fmt.pct((b.lo + b.hi) / 2)}</small></div>`).join('')}</div>`;
+  host.innerHTML = `<div class="history-histogram">${bins.map((b) => `<button type="button" class="hist-bin ${b.hi <= 0 ? 'loss' : b.lo >= 0 ? 'gain' : 'flat'}" title="${fmt.pct(b.lo)} تا ${fmt.pct(b.hi)}: ${fmt.int(b.n)} آفست" aria-label="از ${fmt.pct(b.lo)} تا ${fmt.pct(b.hi)}، ${fmt.int(b.n)} آفست"><b style="height:${Math.max(5, (b.n / max) * 100)}%"></b><span>${fmt.int(b.n)}</span><small>${fmt.pct((b.lo + b.hi) / 2)}</small></button>`).join('')}<span class="hist-y-title">تعداد آفست</span><span class="hist-x-title">بازده</span></div>`;
 }
 
 function lineChart(host, rows, series, { money = false } = {}) {
@@ -79,45 +81,103 @@ function lineChart(host, rows, series, { money = false } = {}) {
     host.innerHTML = '<p class="empty-note">برای نمودار، دست‌کم دو روز داده معتبر لازم است.</p>';
     return;
   }
-  const values = data.flatMap((r) => series.map((s) => Number(r[s.key])).filter(Number.isFinite));
-  let lo = Math.min(...values, 0), hi = Math.max(...values, 0);
-  if (Math.abs(hi - lo) < 1e-9) { hi += 1; lo -= 1; }
-  const W = 760, H = 260, L = 62, R = 18, T = 18, B = 42;
-  const x = (i) => L + (i / Math.max(1, data.length - 1)) * (W - L - R);
-  const y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
-  const zeroY = y(0);
-  const paths = series.map((s) => {
-    const points = data.map((r, i) => `${x(i).toFixed(1)},${y(Number(r[s.key])).toFixed(1)}`).join(' ');
-    return `<polyline fill="none" stroke="${s.color}" stroke-width="2.4" vector-effect="non-scaling-stroke" points="${points}"/>`;
-  }).join('');
-  const ticks = [hi, (hi + lo) / 2, lo].map((v) => `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${money ? fmt.money(v) : fmt.pct(v)}</text>`).join('');
-  const legend = series.map((s, i) => `<g transform="translate(${L + i * 150},${H - 10})"><circle r="4" fill="${s.color}"/><text x="10" y="4">${esc(s.label)}</text></g>`).join('');
-  host.innerHTML = `<svg class="history-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="نمودار تاریخی">
-    <line x1="${L}" x2="${W - R}" y1="${zeroY}" y2="${zeroY}" class="chart-zero"/>
-    ${ticks}${paths}${legend}
-    <text x="${L}" y="${H - 26}">${esc(data[0].dateLabel)}</text>
-    <text x="${W - R}" y="${H - 26}" text-anchor="end">${esc(data.at(-1).dateLabel)}</text>
-  </svg>`;
+  const active = new Set(series.map((_, i) => i));
+  const axis = (v) => money ? fmt.money(v) : fmt.pct(v);
+  const W = 820, H = 330, L = 92, R = 24, T = 24, B = 64;
+  let cursorIndex = data.length - 1;
+
+  const render = () => {
+    const shown = series.filter((_, i) => active.has(i));
+    const values = data.flatMap((r) => shown.map((s) => Number(r[s.key])).filter(Number.isFinite));
+    let lo = Math.min(...values, 0), hi = Math.max(...values, 0);
+    if (Math.abs(hi - lo) < 1e-9) { hi += 1; lo -= 1; }
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    const x = (i) => L + (i / Math.max(1, data.length - 1)) * (W - L - R);
+    const y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+    const yTicks = Array.from({ length: 5 }, (_, i) => lo + ((hi - lo) * i) / 4);
+    const xIndexes = [...new Set(Array.from({ length: Math.min(5, data.length) }, (_, i) => Math.round((i * (data.length - 1)) / Math.max(1, Math.min(5, data.length) - 1))))];
+    const grid = yTicks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="history-grid"/><text x="${L - 9}" y="${y(v) + 4}" text-anchor="end">${axis(v)}</text>`).join('');
+    const xTicks = xIndexes.map((i) => `<line x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${H - B}" class="history-grid history-grid-x"/><text x="${x(i)}" y="${H - B + 20}" text-anchor="middle">${esc(data[i].dateLabel.slice(5))}</text>`).join('');
+    const paths = series.map((s, index) => {
+      if (!active.has(index)) return '';
+      const points = data.map((r, i) => Number.isFinite(Number(r[s.key])) ? `${x(i).toFixed(1)},${y(Number(r[s.key])).toFixed(1)}` : '').filter(Boolean).join(' ');
+      return `<polyline class="history-line" fill="none" stroke="${s.color}" points="${points}"/>`;
+    }).join('');
+    host.innerHTML = `<div class="history-chartbox"><div class="history-chart-legend">${series.map((s, i) => `<button type="button" data-series="${i}" aria-pressed="${active.has(i)}" style="--series:${s.color}"><i></i>${esc(s.label)}</button>`).join('')}</div><div class="history-chart-stage"><svg class="history-svg" viewBox="0 0 ${W} ${H}" tabindex="0" role="group" aria-label="نمودار تاریخی تعاملی؛ با حرکت ماوس جزئیات هر روز نمایش داده می‌شود">
+      ${grid}${xTicks}<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="chart-zero"/>${paths}
+      <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" class="history-axis"/><line x1="${L}" x2="${L}" y1="${T}" y2="${H - B}" class="history-axis"/>
+      <text class="history-axis-title" x="${(L + W - R) / 2}" y="${H - 9}" text-anchor="middle">تاریخ معاملاتی</text>
+      <text class="history-axis-title" transform="translate(17 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">${money ? 'سود و زیان (ریال)' : 'بازده (درصد)'}</text>
+      <g class="history-cursor" hidden><line y1="${T}" y2="${H - B}"/><g class="history-cursor-dots"></g></g>
+    </svg><div class="history-tooltip" hidden></div></div></div>`;
+    const svg = host.querySelector('svg');
+    const tip = host.querySelector('.history-tooltip');
+    const cursor = host.querySelector('.history-cursor');
+    const showAt = (index, clientX = NaN, clientY = NaN) => {
+      cursorIndex = Math.max(0, Math.min(data.length - 1, index));
+      const row = data[cursorIndex], cx = x(cursorIndex);
+      cursor.removeAttribute('hidden');
+      const line = cursor.querySelector('line'); line.setAttribute('x1', cx); line.setAttribute('x2', cx);
+      cursor.querySelector('.history-cursor-dots').innerHTML = series.map((s, i) => active.has(i) && Number.isFinite(Number(row[s.key])) ? `<circle cx="${cx}" cy="${y(Number(row[s.key]))}" r="4" fill="${s.color}"/>` : '').join('');
+      tip.hidden = false;
+      tip.innerHTML = `<b>${esc(row.dayName)} ${esc(row.dateLabel)}</b>${series.map((s, i) => active.has(i) ? `<span><i style="--series:${s.color}"></i>${esc(s.label)}: <strong class="${signTone(Number(row[s.key]))}">${axis(Number(row[s.key]))}</strong></span>` : '').join('')}`;
+      if (Number.isFinite(clientX)) {
+        const box = host.querySelector('.history-chart-stage').getBoundingClientRect();
+        tip.style.left = `${Math.min(Math.max(8, clientX - box.left + 12), Math.max(8, box.width - 210))}px`;
+        tip.style.top = `${Math.max(8, clientY - box.top - 18)}px`;
+      }
+    };
+    svg.addEventListener('pointermove', (event) => {
+      const box = svg.getBoundingClientRect();
+      const vx = ((event.clientX - box.left) / box.width) * W;
+      showAt(Math.round(((vx - L) / (W - L - R)) * (data.length - 1)), event.clientX, event.clientY);
+    });
+    svg.addEventListener('pointerleave', () => { cursor.setAttribute('hidden', ''); tip.hidden = true; });
+    svg.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault(); showAt(cursorIndex + (event.key === 'ArrowRight' ? 1 : -1));
+    });
+    host.querySelectorAll('[data-series]').forEach((button) => button.addEventListener('click', () => {
+      const i = Number(button.dataset.series);
+      if (active.has(i) && active.size === 1) return;
+      active.has(i) ? active.delete(i) : active.add(i); render();
+    }));
+  };
+  render();
 }
 
 function scatterChart(host, rows) {
   const data = rows.filter((r) => Number.isFinite(r.summary?.last?.returnPct) && Number.isFinite(r.summary?.maxDrawdown));
   if (!data.length) { host.innerHTML = '<p class="empty-note">ترکیب معتبری برای نمودار نیست.</p>'; return; }
-  const W = 760, H = 280, L = 62, R = 18, T = 18, B = 42;
+  const W = 820, H = 330, L = 92, R = 24, T = 24, B = 64;
   const xs = data.map((r) => Math.abs(r.summary.maxDrawdown));
   const ys = data.map((r) => r.summary.last.returnPct);
   const xMax = Math.max(...xs, 1), yMin = Math.min(...ys, 0), yMax = Math.max(...ys, 0, 1);
   const x = (v) => L + (v / xMax) * (W - L - R);
   const y = (v) => T + ((yMax - v) / Math.max(1e-9, yMax - yMin)) * (H - T - B);
-  const circles = data.slice(0, 800).map((r) => {
+  const plotted = data.slice(0, 800);
+  const circles = plotted.map((r, index) => {
     const ret = r.summary.last.returnPct;
     const title = `${r.legs.map((l) => l.name).join(' + ')} | بازده ${fmt.pct(ret)} | افت ${fmt.money(Math.abs(r.summary.maxDrawdown))}`;
-    return `<circle cx="${x(Math.abs(r.summary.maxDrawdown))}" cy="${y(ret)}" r="3.4" class="${ret >= 0 ? 'scatter-gain' : 'scatter-loss'}"><title>${esc(title)}</title></circle>`;
+    return `<circle data-point="${index}" cx="${x(Math.abs(r.summary.maxDrawdown))}" cy="${y(ret)}" r="4" class="${ret >= 0 ? 'scatter-gain' : 'scatter-loss'}"><title>${esc(title)}</title></circle>`;
   }).join('');
-  host.innerHTML = `<svg class="history-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="ریسک در برابر بازده">
-    <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="chart-zero"/>
-    ${circles}<text x="${L}" y="${H - 10}">افت کمتر</text><text x="${W - R}" y="${H - 10}" text-anchor="end">افت بیشتر</text>
-  </svg>`;
+  const yTicks = Array.from({ length: 5 }, (_, i) => yMin + ((yMax - yMin) * i) / 4);
+  const xTicks = Array.from({ length: 5 }, (_, i) => (xMax * i) / 4);
+  host.innerHTML = `<div class="history-chart-stage"><svg class="history-svg" viewBox="0 0 ${W} ${H}" role="group" aria-label="ریسک در برابر بازده؛ برای جزئیات روی نقطه برو">
+    ${yTicks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="history-grid"/><text x="${L - 9}" y="${y(v) + 4}" text-anchor="end">${fmt.pct(v)}</text>`).join('')}
+    ${xTicks.map((v) => `<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${H - B}" class="history-grid history-grid-x"/><text x="${x(v)}" y="${H - B + 20}" text-anchor="middle">${fmt.money(v)}</text>`).join('')}
+    <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="chart-zero"/>${circles}
+    <text class="history-axis-title" x="${(L + W - R) / 2}" y="${H - 9}" text-anchor="middle">قدر مطلق افت از قله</text><text class="history-axis-title" transform="translate(17 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">بازده پایان</text>
+  </svg><div class="history-tooltip" hidden></div></div>`;
+  const stage = host.querySelector('.history-chart-stage'), tip = host.querySelector('.history-tooltip');
+  stage.addEventListener('pointermove', (event) => {
+    const point = event.target.closest?.('[data-point]');
+    if (!point) { tip.hidden = true; return; }
+    const r = plotted[Number(point.dataset.point)], box = stage.getBoundingClientRect();
+    tip.hidden = false; tip.style.left = `${Math.min(event.clientX - box.left + 12, Math.max(8, box.width - 250))}px`; tip.style.top = `${Math.max(8, event.clientY - box.top - 18)}px`;
+    tip.innerHTML = `<b>${esc(r.legs.map((l) => l.name).join(' + '))}</b><span>بازده: <strong class="${signTone(r.summary.last.returnPct)}">${fmt.pct(r.summary.last.returnPct)}</strong></span><span>افت: ${fmt.money(Math.abs(r.summary.maxDrawdown))}</span>`;
+  });
+  stage.addEventListener('pointerleave', () => { tip.hidden = true; });
 }
 
 function csvCell(value) {
@@ -196,6 +256,22 @@ export async function mount(root, { state }) {
         </div>
       </section>
 
+      <section class="card history-payoff-card">
+        <div class="section-head"><div><p class="eyebrow">ورودی ثابت روز اول؛ قیمت پایه متغیر در هر روز</p><h2>نمودار روزانه سود و زیان استراتژی</h2></div><b id="h-payoff-date">—</b></div>
+        <p class="note">منحنی از قیمت‌های ورود روز اول ساخته می‌شود و ثابت می‌ماند؛ با جابه‌جایی روز، فقط خط قیمت پایانی سهم پایه و شاخص‌های تصمیم به‌روز می‌شوند. سود آفست واقعی همان روز جدا از سود سناریویی سررسید گزارش می‌شود.</p>
+        <div class="payoff-day-controls">
+          <label for="h-payoff-day">روز معاملاتی<input id="h-payoff-day" type="range" min="0" value="0"></label>
+          <div class="payoff-layer-controls" aria-label="لایه‌های نمودار">
+            <label><input type="checkbox" data-payoff-layer="fill" checked> ناحیه سود/زیان</label>
+            <label><input type="checkbox" data-payoff-layer="strike" checked> قیمت‌های اعمال</label>
+            <label><input type="checkbox" data-payoff-layer="be" checked> سربه‌سری‌ها</label>
+            <label><input type="checkbox" data-payoff-layer="spot" checked> قیمت پایه روز</label>
+            <label><input type="checkbox" data-payoff-layer="metrics" checked> پارامترهای تصمیم</label>
+          </div>
+        </div>
+        <div class="history-payoff-shell"><div id="h-payoff-decisions" class="payoff-decision-strip"></div><div id="h-daily-payoff"></div></div>
+      </section>
+
       <div class="history-chart-grid">
         <section class="card"><div class="section-head"><h2>سود و زیان در زمان</h2></div><div id="h-pnl-chart" class="history-chart"></div></section>
         <section class="card"><div class="section-head"><h2>بازده استراتژی و تغییر پایه</h2></div><div id="h-ret-chart" class="history-chart"></div></section>
@@ -228,6 +304,15 @@ export async function mount(root, { state }) {
         <p class="note">هر خانه نتیجه ورود در یک روز و آفست در روز بعدی است. برای بازه‌های بلند، تاریخ‌ها نمونه‌برداری می‌شوند تا نمودار خوانا بماند.</p>
         <div id="h-rolling-out" class="rolling-wrap"></div>
       </section>
+
+      <section class="card">
+        <div class="section-head"><div><p class="eyebrow">ردیف = تاریخ ورود؛ ستون = تاریخ خروج</p><h2>ماتریس بازده ورود × خروج و مسیر معامله</h2></div><div class="matrix-mode" role="group" aria-label="نوع بازده ماتریس"><button type="button" class="ghost" data-matrix-mode="cumulative" aria-pressed="true">انباشته از ورود</button><button type="button" class="ghost" data-matrix-mode="daily" aria-pressed="false">تغییر همان روز</button></div></div>
+        <p class="note">روی هر عدد کلیک کن تا مسیر کامل معامله، بهترین/بدترین نقطه، افت، کارمزد، اثر هر پا و نسبت سود حفظ‌شده تا خروج نمایش داده شود.</p>
+        <div id="h-return-matrix" class="rolling-wrap"><p class="empty-note">ابتدا «محاسبه ماتریس» را بزن.</p></div>
+        <div id="h-trade-detail" class="trade-detail" hidden></div>
+        <div class="section-head holding-head"><div><p class="eyebrow">تجمیع همه تاریخ‌های ورود</p><h3>پروفایل افق نگهداری</h3></div><span>برای کشف افق پایدار، میانه بازده با جریمه پراکندگی رتبه‌بندی می‌شود.</span></div>
+        <div id="h-holding-profile" class="history-table-wrap"><p class="empty-note">پس از محاسبه ماتریس ساخته می‌شود.</p></div>
+      </section>
     </section>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
@@ -236,6 +321,7 @@ export async function mount(root, { state }) {
   const loadBtn = $('h-load'), runBtn = $('h-run'), exportBtn = $('h-export');
   let chain = new Map(), ua = null, analysisUa = null, contracts = [], seriesByIns = {}, dates = [];
   let currentReplay = null, currentArgs = null, autoRows = [], selectedAuto = null;
+  let rollingResult = null, matrixMode = 'cumulative', payoffChart = null;
   let worker = null, seq = 0, rollingResolve = null;
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -611,6 +697,107 @@ export async function mount(root, { state }) {
     enableColumnSort($('h-optimal').querySelector('table'));
   }
 
+  function renderDailyPayoff() {
+    const valid = currentReplay?.rows?.filter((r) => r.status === 'ok' && Number.isFinite(r.baseClose)) || [];
+    if (!valid.length) { $('h-daily-payoff').innerHTML = '<p class="empty-note">روز معتبر برای رسم وجود ندارد.</p>'; return; }
+    const slider = $('h-payoff-day');
+    slider.max = String(valid.length - 1);
+    slider.value = String(Math.min(valid.length - 1, Math.max(0, Number(slider.value) || 0)));
+    const row = valid[Number(slider.value)];
+    $('h-payoff-date').textContent = `${row.dayName} ${row.dateLabel} · پایه ${fmt.money(row.baseClose)}`;
+    const enabled = Object.fromEntries([...root.querySelectorAll('[data-payoff-layer]')].map((input) => [input.dataset.payoffLayer, input.checked]));
+    payoffChart?.destroy?.();
+    payoffChart = mountPayoff($('h-daily-payoff'), currentReplay.priced, currentReplay.entry.netCash, {
+      fees: feesOf(state.settings), spot: row.baseClose, showToday: false, padPct: 0.38, layers: enabled,
+    });
+    const analysis = payoffChart.analysis;
+    const capital = currentReplay.entry?.capital?.value;
+    const bes = analysis?.breakevens || [];
+    const nearest = bes.length ? bes.reduce((a, b) => Math.abs(b - row.baseClose) < Math.abs(a - row.baseClose) ? b : a) : NaN;
+    const beDistance = Number.isFinite(nearest) && row.baseClose > 0 ? ((nearest / row.baseClose) - 1) * 100 : NaN;
+    const maxProfitPct = Number.isFinite(analysis?.maxProfit) && capital > 0 ? (analysis.maxProfit / capital) * 100 : analysis?.maxProfit;
+    const maxLossPct = Number.isFinite(analysis?.maxLoss) && capital > 0 ? (analysis.maxLoss / capital) * 100 : analysis?.maxLoss;
+    const scenario = analysis?.at?.(row.baseClose);
+    const decision = [
+      ['سربه‌سری', bes.length ? bes.map((v) => fmt.money(v)).join(' · ') : 'ندارد'],
+      ['نزدیک‌ترین فاصله', Number.isFinite(beDistance) ? `${fmt.pct(beDistance)} · ${fmt.money(nearest)}` : '—'],
+      ['حداکثر سود', Number.isFinite(analysis?.maxProfit) ? `${fmt.money(analysis.maxProfit)} · ${fmt.pct(maxProfitPct)}` : 'نامحدود'],
+      ['حداکثر زیان', Number.isFinite(analysis?.maxLoss) ? `${fmt.money(analysis.maxLoss)} · ${fmt.pct(maxLossPct)}` : 'نامحدود'],
+      ['سناریوی سررسید در پایه روز', Number.isFinite(scenario) ? fmt.money(scenario) : '—'],
+      ['آفست واقعی همان روز', `${fmt.money(row.netPnl)} · ${fmt.pct(row.returnPct)}`],
+      ['تا سررسید', Number.isFinite(row.daysToExpiry) ? `${fmt.int(row.daysToExpiry)} روز` : '—'],
+    ];
+    $('h-payoff-decisions').innerHTML = decision.map(([label, value]) => `<div><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('');
+    const chart = $('h-daily-payoff');
+    chart.querySelectorAll('.fill-gain,.fill-loss').forEach((el) => { el.hidden = !enabled.fill; });
+    chart.querySelectorAll('.strike,.strike-lbl').forEach((el) => { el.hidden = !enabled.strike; });
+    chart.querySelectorAll('.be,.be-lbl').forEach((el) => { el.hidden = !enabled.be; });
+    chart.querySelectorAll('.spot,.spot-lbl,.spot-pnl').forEach((el) => { el.hidden = !enabled.spot; });
+    $('h-payoff-decisions').hidden = !enabled.metrics;
+  }
+
+  function heatColor(value, max) {
+    if (!Number.isFinite(value)) return 'transparent';
+    const alpha = 0.12 + Math.min(1, Math.abs(value) / Math.max(max, 1e-9)) * 0.76;
+    return value >= 0 ? `rgba(11,110,107,${alpha})` : `rgba(168,31,50,${alpha})`;
+  }
+
+  function sampledDates(allDates) {
+    const step = Math.max(1, Math.ceil(allDates.length / 45));
+    return allDates.filter((_, i) => i % step === 0 || i === allDates.length - 1);
+  }
+
+  function renderReturnMatrix() {
+    if (!rollingResult?.dates?.length) return;
+    const shown = sampledDates(rollingResult.dates);
+    const map = new Map((rollingResult.cells || []).map((c) => [`${c.entryDate}|${c.exitDate}`, c]));
+    const key = matrixMode === 'daily' ? 'dailyReturnPct' : 'returnPct';
+    const vals = [...map.values()].map((c) => Math.abs(c[key])).filter(Number.isFinite);
+    const max = Math.max(...vals, 1);
+    $('h-return-matrix').innerHTML = `<table class="rolling-table return-matrix"><thead><tr><th>ورود \ خروج</th>${shown.map((d) => `<th title="${historyDateLabel(d)}">${historyDateLabel(d).slice(5)}</th>`).join('')}</tr></thead><tbody>${shown.map((entry) => `<tr><th>${historyDateLabel(entry)}</th>${shown.map((exit) => {
+      const c = map.get(`${entry}|${exit}`), value = c?.[key];
+      if (!c || exit < entry) return '<td class="matrix-empty"></td>';
+      const label = matrixMode === 'daily' ? 'تغییر همان روز' : 'بازده انباشته';
+      return `<td style="background:${heatColor(value, max)}"><button type="button" data-trade-cell="${entry}|${exit}" title="${label}: ${fmt.pct(value)} · انباشته ${fmt.pct(c.returnPct)} · ${fmt.money(c.netPnl)}">${fmt.pct(value)}</button></td>`;
+    }).join('')}</tr>`).join('')}</tbody></table>`;
+  }
+
+  function renderHoldingProfile() {
+    const profile = holdingPeriodProfile(rollingResult);
+    const best = profile.best;
+    $('h-holding-profile').innerHTML = `${best ? `<div class="holding-best"><span>افق مقاوم‌تر در این نمونه</span><b>${fmt.int(best.holdingTradingDays)} روز معاملاتی</b><small>امتیاز محافظه‌کارانه ${fmt.pct(best.robustScore)} · میانه ${fmt.pct(best.medianReturn)} · موفقیت ${fmt.pct(best.winPct)} · ${fmt.int(best.samples)} نمونه</small></div>` : ''}<table class="history-table"><thead><tr><th>روز نگهداری</th><th>نمونه</th><th>میانگین بازده</th><th>میانه بازده</th><th>چارک ۲۵٪</th><th>چارک ۷۵٪</th><th>انحراف معیار</th><th>درصد سودده</th><th>میانگین تغییر روز خروج</th><th>امتیاز مقاوم</th></tr></thead><tbody>${profile.rows.map((r) => `<tr${best === r ? ' class="holding-picked"' : ''}><td>${fmt.int(r.holdingTradingDays)}</td><td>${fmt.int(r.samples)}</td><td class="${signTone(r.meanReturn)}">${fmt.pct(r.meanReturn)}</td><td class="${signTone(r.medianReturn)}">${fmt.pct(r.medianReturn)}</td><td class="${signTone(r.p25)}">${fmt.pct(r.p25)}</td><td class="${signTone(r.p75)}">${fmt.pct(r.p75)}</td><td>${fmt.pct(r.returnStdDev)}</td><td>${fmt.pct(r.winPct)}</td><td class="${signTone(r.meanDailyChange)}">${fmt.pct(r.meanDailyChange)}</td><td class="${signTone(r.robustScore)}">${fmt.pct(r.robustScore)}</td></tr>`).join('')}</tbody></table><p class="note">امتیاز مقاوم = میانه بازده منهای یک‌چهارم انحراف معیار. این معیار برای مقایسه افق‌هاست، نه پیش‌بینی یا توصیه خرید و فروش.</p>`;
+    enableColumnSort($('h-holding-profile').querySelector('table'));
+  }
+
+  function showTradeDetail(entryDate, exitDate) {
+    const detail = replayTradeDetail(currentArgs, entryDate, exitDate);
+    const host = $('h-trade-detail');
+    if (!detail.ok) { host.hidden = false; host.innerHTML = `<p class="empty-note">${esc(detail.error)}</p>`; return; }
+    const { selected, best, worst, firstProfit, path } = detail;
+    const selectedDailyPnl = detail.tradingDays === 0 ? selected.netPnl : selected.pnlDelta;
+    const metrics = [
+      ['ورود → خروج', `${historyDateLabel(entryDate)} ← ${historyDateLabel(exitDate)}`],
+      ['مدت', `${fmt.int(detail.tradingDays)} روز معاملاتی · ${fmt.int(detail.calendarDays)} روز تقویمی`],
+      ['بازده/سود خروج', `${fmt.pct(selected.returnPct)} · ${fmt.money(selected.netPnl)}`],
+      ['تغییر همان روز', `${fmt.pct(detail.capital > 0 ? (selectedDailyPnl / detail.capital) * 100 : NaN)} · ${fmt.money(selectedDailyPnl)}`],
+      ['بهترین نقطه مسیر', `${best.dateLabel} · ${fmt.pct(best.returnPct)} · ${fmt.money(best.netPnl)}`],
+      ['بدترین نقطه مسیر', `${worst.dateLabel} · ${fmt.pct(worst.returnPct)} · ${fmt.money(worst.netPnl)}`],
+      ['اولین روز سود', firstProfit ? `${firstProfit.dateLabel} · روز ${fmt.int(firstProfit.holdingDays)}` : 'نداشته'],
+      ['سود حفظ‌شده از بهترین نقطه', Number.isFinite(detail.capturePct) ? fmt.pct(detail.capturePct) : '—'],
+      ['بازده پایه', fmt.pct(selected.baseCumulativePct)],
+      ['کل کارمزد ورود و خروج', fmt.money(selected.totalFees)],
+    ];
+    host.hidden = false;
+    host.innerHTML = `<div class="section-head"><div><p class="eyebrow">جزئیات خانه انتخاب‌شده</p><h3>${historyDateLabel(entryDate)} تا ${historyDateLabel(exitDate)}</h3></div><button type="button" class="ghost" data-close-detail>بستن</button></div><div class="trade-detail-kpis">${metrics.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div><div class="history-chart" data-trade-path></div><div class="history-table-wrap"><table class="history-table"><thead><tr><th>تاریخ</th><th>روز</th><th>پایه</th><th>بازده پایه</th><th>سود خالص</th><th>بازده انباشته</th><th>تغییر همان روز</th><th>افت از قله</th><th>قیمت/اثر هر پا</th></tr></thead><tbody>${path.map((r, index) => { const daily = index === 0 ? r.netPnl : r.pnlDelta; return `<tr><td>${r.dateLabel}</td><td>${r.dayName}</td><td>${fmt.money(r.baseClose)}</td><td class="${signTone(r.baseCumulativePct)}">${fmt.pct(r.baseCumulativePct)}</td><td class="${signTone(r.netPnl)}">${fmt.money(r.netPnl)}</td><td class="${signTone(r.returnPct)}">${fmt.pct(r.returnPct)}</td><td class="${signTone(daily)}">${fmt.money(daily)}</td><td class="${signTone(r.drawdown)}">${fmt.money(r.drawdown)}</td><td>${r.perLeg.map((leg, i) => `${faDigits(i + 1)}: ${fmt.money(leg.exitPrice)} / ${fmt.money(leg.netPnl)}`).join('<br>')}</td></tr>`; }).join('')}</tbody></table></div>`;
+    lineChart(host.querySelector('[data-trade-path]'), path, [
+      { key: 'returnPct', label: 'بازده انباشته', color: '#0b6e6b' },
+      { key: 'baseCumulativePct', label: 'بازده پایه', color: '#7254a3' },
+    ]);
+    enableColumnSort(host.querySelector('table'));
+    host.querySelector('[data-close-detail]').addEventListener('click', () => { host.hidden = true; });
+    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
   function renderReplay(legs, manualEntry = {}, label = '') {
     const args = argsFor(legs, manualEntry);
     const replay = replayHistory(args);
@@ -621,6 +808,7 @@ export async function mount(root, { state }) {
     paintKpis(replay); paintStatistics(replay); paintDayTable(replay); paintContrib(replay);
     paintLegEvolution(replay); histogram($('h-distribution'), replay.rows);
     paintBasis(args); paintSensitivity(args, replay); paintMargin(replay); paintOptimal(args, replay);
+    $('h-payoff-day').value = '0'; renderDailyPayoff();
     enableColumnSort($('h-stats').querySelector('table'));
     enableColumnSort($('h-weekday-stats').querySelector('table'));
     lineChart($('h-pnl-chart'), replay.rows, [
@@ -630,7 +818,11 @@ export async function mount(root, { state }) {
       { key: 'returnPct', label: 'بازده استراتژی', color: '#0b6e6b' }, { key: 'baseCumulativePct', label: 'تغییر پایه', color: '#7254a3' },
     ]);
     lineChart($('h-dd-chart'), replay.rows, [{ key: 'drawdown', label: 'افت از قله', color: '#a81f32' }], { money: true });
+    rollingResult = null;
     $('h-rolling-out').innerHTML = '';
+    $('h-return-matrix').innerHTML = '<p class="empty-note">ابتدا «محاسبه ماتریس» را بزن.</p>';
+    $('h-holding-profile').innerHTML = '<p class="empty-note">پس از محاسبه ماتریس ساخته می‌شود.</p>';
+    $('h-trade-detail').hidden = true;
     setStatus(`تحلیل ${fmt.int(replay.summary.validDays)} روز معتبر آماده شد.`);
   }
 
@@ -722,19 +914,15 @@ export async function mount(root, { state }) {
     button.disabled = false;
     if (response.error) { $('h-rolling-out').textContent = response.error; return; }
     const result = response.result;
+    rollingResult = result;
     const allDates = result.dates || [];
     if (!allDates.length) { $('h-rolling-out').textContent = 'داده‌ای برای ماتریس نیست.'; return; }
-    const step = Math.max(1, Math.ceil(allDates.length / 45));
-    const shown = allDates.filter((_, i) => i % step === 0 || i === allDates.length - 1);
+    const shown = sampledDates(allDates);
     const map = new Map((result.cells || []).map((c) => [`${c.entryDate}|${c.exitDate}`, c]));
     const vals = [...map.values()].map((c) => Math.abs(c.returnPct)).filter(Number.isFinite);
     const max = Math.max(...vals, 1);
-    const color = (v) => {
-      if (!Number.isFinite(v)) return 'transparent';
-      const a = 0.14 + Math.min(1, Math.abs(v) / max) * 0.72;
-      return v >= 0 ? `rgba(11,110,107,${a})` : `rgba(168,31,50,${a})`;
-    };
-    $('h-rolling-out').innerHTML = `<table class="rolling-table"><thead><tr><th>ورود \ آفست</th>${shown.map((d) => `<th title="${historyDateLabel(d)}">${historyDateLabel(d).slice(5)}</th>`).join('')}</tr></thead><tbody>${shown.map((entry) => `<tr><th>${historyDateLabel(entry)}</th>${shown.map((exit) => { const c = map.get(`${entry}|${exit}`); return `<td style="background:${color(c?.returnPct)}" title="${c ? `${historyDateLabel(entry)} تا ${historyDateLabel(exit)}: ${fmt.pct(c.returnPct)} · ${fmt.money(c.netPnl)}` : 'فاقد داده'}">${c ? fmt.pct(c.returnPct) : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table>`;
+    $('h-rolling-out').innerHTML = `<table class="rolling-table"><thead><tr><th>ورود \ آفست</th>${shown.map((d) => `<th title="${historyDateLabel(d)}">${historyDateLabel(d).slice(5)}</th>`).join('')}</tr></thead><tbody>${shown.map((entry) => `<tr><th>${historyDateLabel(entry)}</th>${shown.map((exit) => { const c = map.get(`${entry}|${exit}`); return `<td style="background:${heatColor(c?.returnPct, max)}" title="${c ? `${historyDateLabel(entry)} تا ${historyDateLabel(exit)}: ${fmt.pct(c.returnPct)} · ${fmt.money(c.netPnl)}` : 'فاقد داده'}">${c ? fmt.pct(c.returnPct) : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table>`;
+    renderReturnMatrix(); renderHoldingProfile();
   }
 
   baseSelect.addEventListener('change', () => {
@@ -747,6 +935,19 @@ export async function mount(root, { state }) {
   $('h-start').addEventListener('input', paintRange); $('h-end').addEventListener('input', paintRange);
   loadBtn.addEventListener('click', loadHistory); runBtn.addEventListener('click', runAnalysis);
   exportBtn.addEventListener('click', exportCsv); $('h-rolling').addEventListener('click', renderRolling);
+  $('h-payoff-day').addEventListener('input', renderDailyPayoff);
+  root.querySelectorAll('[data-payoff-layer]').forEach((input) => input.addEventListener('change', renderDailyPayoff));
+  root.querySelectorAll('[data-matrix-mode]').forEach((button) => button.addEventListener('click', () => {
+    matrixMode = button.dataset.matrixMode;
+    root.querySelectorAll('[data-matrix-mode]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+    renderReturnMatrix();
+  }));
+  $('h-return-matrix').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-trade-cell]');
+    if (!button) return;
+    const [entry, exit] = button.dataset.tradeCell.split('|').map(Number);
+    showTradeDetail(entry, exit);
+  });
   $('h-expiry-all').addEventListener('click', () => {
     root.querySelectorAll('[data-history-expiry]').forEach((input) => { input.checked = true; });
     paintExpirySummary(); invalidateLoadedHistory();
@@ -776,5 +977,5 @@ export async function mount(root, { state }) {
   });
 
   await loadUniverse();
-  return () => { if (worker) worker.terminate(); };
+  return () => { payoffChart?.destroy?.(); if (worker) worker.terminate(); };
 }

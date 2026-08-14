@@ -96,10 +96,11 @@ function todaySeries(legs, netCash, opt) {
  */
 function frame(points, analysis, opt, xMin, xMax, todayPoints) {
   const spot = opt.spot;
+  const layers = { fill: true, strike: true, be: true, spot: true, ...(opt.layers || {}) };
   const W = opt.width ?? 760, H = opt.height ?? 280;
   // حاشیه چپ جا برای برچسب محور عمودی باز می‌کند و حاشیه پایین برای دو ردیف
   // برچسب: قیمت اعمال بالای محور، و مقیاس قیمت پایه زیر آن.
-  const pad = { t: 20, r: 16, b: 40, l: 54 };
+  const pad = { t: 24, r: 18, b: 54, l: 72 };
 
   // فقط نقاط داخل بازه، به‌علاوه دو نقطه لبه که خط تا لبه قاب برسد
   const at = analysis.at;
@@ -183,11 +184,14 @@ function frame(points, analysis, opt, xMin, xMax, todayPoints) {
 
   const bes = analysis.breakevens.filter((b) => b >= xMin && b <= xMax).map((b) => `
     <circle class="be" cx="${X(b)}" cy="${y0}" r="4"/>
-    <text class="lbl" x="${X(b)}" y="${y0 - 9}" text-anchor="middle">${money(b)}</text>`).join('');
+    <text class="lbl be-lbl" x="${X(b)}" y="${y0 - 9}" text-anchor="middle">${money(b)}</text>`).join('');
 
   const spotLine = Number.isFinite(spot) && spot >= xMin && spot <= xMax
     ? `<line class="spot" x1="${X(spot)}" y1="${pad.t}" x2="${X(spot)}" y2="${H - pad.b}"/>
-       <text class="lbl" x="${X(spot)}" y="${pad.t - 6}" text-anchor="middle" style="fill:var(--warn)">پایه ${money(spot)}</text>` : '';
+       <text class="lbl spot-lbl" x="${X(spot)}" y="${pad.t - 7}" text-anchor="middle" style="fill:var(--warn)">پایه ${money(spot)}</text>` : '';
+  const spotPnl = Number.isFinite(spot) ? analysis.at(spot) : NaN;
+  const spotPoint = Number.isFinite(spotPnl) && spot >= xMin && spot <= xMax
+    ? `<circle class="spot-pnl" cx="${X(spot)}" cy="${Y(Math.min(Math.max(spotPnl, yMin), yMax))}" r="5"><title>سود و زیان سناریویی در قیمت پایه روز: ${money(spotPnl)}</title></circle>` : '';
 
   // legend فقط وقتی بیش از یک منحنی روی نمودار هست معنا دارد — «امروز» و/یا
   // هر موقعیت مقایسه‌ای انتخاب‌شده. برچسب‌ها می‌توانند طولانی باشند (نام
@@ -209,13 +213,15 @@ function frame(points, analysis, opt, xMin, xMax, todayPoints) {
   const cmpPaths = cmpLines.map((c) => `<path class="curve-${c.cls}" d="${c.d}"/>`).join('');
 
   const svg = `<svg class="payoff" viewBox="0 0 ${W} ${H}" role="img" aria-label="نمودار بازده در سررسید">
-      ${grid}${areas.join('')}${strikes}${spotLine}
+      ${grid}${layers.fill ? areas.join('') : ''}${layers.strike ? strikes : ''}${layers.spot ? spotLine : ''}
       <line class="axis" x1="${pad.l}" y1="${H - pad.b}" x2="${W - pad.r}" y2="${H - pad.b}"/>
       ${xTicks}
+      <text class="lbl axis-title" x="${(pad.l + W - pad.r) / 2}" y="${H - 8}" text-anchor="middle">قیمت سهم پایه</text>
+      <text class="lbl axis-title" transform="translate(14 ${(pad.t + H - pad.b) / 2}) rotate(-90)" text-anchor="middle">سود و زیان</text>
       <line class="zero" x1="${pad.l}" y1="${y0}" x2="${W - pad.r}" y2="${y0}"/>
       ${todayLine ? `<path class="curve-today" d="${todayLine}"/>` : ''}
       ${cmpPaths}
-      <path class="curve" d="${line}"/>${bes}${legend2}
+      <path class="curve" d="${line}"/>${layers.be ? bes : ''}${layers.spot ? spotPoint : ''}${legend2}
       <g class="cursor" hidden>
         <line class="cur-x" y1="${pad.t}" y2="${H - pad.b}"/>
         <circle class="cur-dot" r="3.5"/>

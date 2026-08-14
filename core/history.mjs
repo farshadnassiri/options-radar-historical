@@ -501,20 +501,88 @@ export function entrySensitivity(args, shocks = [-10, -5, 0, 5, 10]) {
 
 /** ماتریس ورودهای پیاپی برای یک ترکیب؛ هر خانه نتیجه ورود i و آفست j است. */
 export function rollingEntryMatrix(args) {
-  const baseRows = (args.seriesByIns?.[String(args.baseIns)] || [])
+  const baseRows = [...new Set((args.seriesByIns?.[String(args.baseIns)] || [])
     .map((r) => normalizeHistoryDate(r.date))
     .filter((d) => d >= normalizeHistoryDate(args.startDate) && d <= normalizeHistoryDate(args.endDate))
-    .sort((a, b) => a - b);
+    .sort((a, b) => a - b))];
   const cells = [];
   for (let i = 0; i < baseRows.length; i++) {
     const replay = replayHistory({ ...args, startDate: baseRows[i], manualEntry: {} });
     if (!replay.ok) continue;
-    for (const row of replay.rows) {
+    for (let rowIndex = 0; rowIndex < replay.rows.length; rowIndex++) {
+      const row = replay.rows[rowIndex];
       if (row.date < baseRows[i] || row.status !== 'ok') continue;
-      cells.push({ entryDate: baseRows[i], exitDate: row.date, netPnl: row.netPnl, returnPct: row.returnPct });
+      const capital = replay.entry?.capital?.value;
+      const dailyPnl = rowIndex === 0 ? row.netPnl : row.pnlDelta;
+      cells.push({
+        entryDate: baseRows[i], exitDate: row.date,
+        netPnl: row.netPnl, returnPct: row.returnPct,
+        dailyPnl,
+        dailyReturnPct: capital > EPS ? (dailyPnl / capital) * 100 : NaN,
+        holdingTradingDays: rowIndex,
+        holdingCalendarDays: row.holdingDays,
+        baseReturnPct: row.baseCumulativePct,
+      });
     }
   }
   return { dates: baseRows, cells };
+}
+
+/**
+ * خلاصه هر افق نگهداری روی تمام تاریخ‌های ورود. این جدول از روی همان
+ * خانه‌های ماتریس ساخته می‌شود و به‌جای انتخاب بهترین تک‌معامله، افقی را
+ * برجسته می‌کند که میانه بهتر و پراکندگی کنترل‌شده‌تری داشته است.
+ */
+export function holdingPeriodProfile(matrix) {
+  const groups = new Map();
+  for (const cell of matrix?.cells || []) {
+    if (!(cell.holdingTradingDays > 0) || !Number.isFinite(cell.returnPct)) continue;
+    const list = groups.get(cell.holdingTradingDays) || [];
+    list.push(cell); groups.set(cell.holdingTradingDays, list);
+  }
+  const rows = [...groups.entries()].map(([holdingTradingDays, cells]) => {
+    const returns = cells.map((c) => c.returnPct);
+    const daily = cells.map((c) => c.dailyReturnPct).filter(Number.isFinite);
+    const deviation = stdDev(returns);
+    const med = median(returns);
+    return {
+      holdingTradingDays, samples: cells.length,
+      meanReturn: average(returns), medianReturn: med,
+      p25: quantile(returns, 0.25), p75: quantile(returns, 0.75),
+      returnStdDev: deviation,
+      winPct: (returns.filter((v) => v > 0).length / returns.length) * 100,
+      meanDailyChange: average(daily),
+      robustScore: med - (Number.isFinite(deviation) ? deviation * 0.25 : 0),
+    };
+  }).sort((a, b) => a.holdingTradingDays - b.holdingTradingDays);
+  const eligible = rows.filter((r) => r.samples >= Math.min(5, Math.max(2, Math.floor((matrix?.dates?.length || 0) / 4))));
+  const best = [...eligible].sort((a, b) =>
+    (b.robustScore - a.robustScore)
+    || (b.winPct - a.winPct)
+    || (b.medianReturn - a.medianReturn))[0] || null;
+  return { rows, best };
+}
+
+/** جزئیات کامل مسیر یک خانه ماتریس، برای پنل بازشونده زیر Heatmap. */
+export function replayTradeDetail(args, entryDate, exitDate) {
+  const entry = normalizeHistoryDate(entryDate), exit = normalizeHistoryDate(exitDate);
+  if (!entry || !exit || exit < entry) return { ok: false, error: 'تاریخ ورود یا خروج معتبر نیست' };
+  const replay = replayHistory({ ...args, startDate: entry, endDate: exit, manualEntry: {} });
+  if (!replay.ok) return replay;
+  const path = replay.rows.filter((r) => r.date <= exit && r.status === 'ok');
+  const selected = path.find((r) => r.date === exit) || null;
+  if (!selected) return { ok: false, error: 'برای این خانه داده خروج معتبر وجود ندارد' };
+  const best = path.reduce((a, r) => (!a || r.returnPct > a.returnPct ? r : a), null);
+  const worst = path.reduce((a, r) => (!a || r.returnPct < a.returnPct ? r : a), null);
+  const firstProfit = path.find((r) => r.netPnl > 0) || null;
+  const capturePct = best?.netPnl > EPS ? (selected.netPnl / best.netPnl) * 100 : NaN;
+  return {
+    ok: true, replay, path, selected, best, worst, firstProfit, capturePct,
+    capital: replay.entry?.capital?.value,
+    entryDate: entry, exitDate: exit,
+    tradingDays: Math.max(0, replay.rows.findIndex((r) => r.date === exit)),
+    calendarDays: daysBetween(entry, exit),
+  };
 }
 
 /**

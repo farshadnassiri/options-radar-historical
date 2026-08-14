@@ -31,7 +31,8 @@ import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE }
 import {
   historyPrice, normalizeHistoryDate, historyDateLabel, historyDayName,
   replayHistory, summarizeReplay, basisMatrix, entrySensitivity, generateHistoricalCombos,
-  historyMarketMetrics, optimizeExitPolicy,
+  historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
+  replayTradeDetail,
 } from '../core/history.mjs';
 
 let pass = 0, fail = 0;
@@ -1771,6 +1772,22 @@ group('۳۲. بازپخش تاریخی استراتژی');
 
   const optimized32 = optimizeExitPolicy(args32, { targets: [1, 5], holdingDays: [1, 2] });
   check('بهینه‌ساز، بهترین خروج مشاهده‌شده و قاعده خروج می‌سازد', optimized32.bestObserved?.date === 20260802 && optimized32.bestPolicy?.samples >= 1);
+
+  const matrixArgs32 = {
+    ...args32,
+    seriesByIns: { ...args32.seriesByIns, 12: [...call32, { date: 20260803, close: 6, last: 5, low: 4, high: 7 }] },
+  };
+  const rolling32 = rollingEntryMatrix(matrixArgs32);
+  const cell32 = rolling32.cells.find((c) => c.entryDate === 20260801 && c.exitDate === 20260802);
+  const sameDayCell32 = rolling32.cells.find((c) => c.entryDate === 20260801 && c.exitDate === 20260801);
+  check('ماتریس ورود×خروج همه تاریخ‌های پایه را نگه می‌دارد', rolling32.dates.length === 3 && rolling32.cells.length === 6, `${rolling32.dates.length} تاریخ، ${rolling32.cells.length} خانه`);
+  check('خانه ماتریس بازده انباشته و تغییر همان روز را جدا دارد', Number.isFinite(cell32?.returnPct) && Number.isFinite(cell32?.dailyReturnPct) && cell32.holdingTradingDays === 1);
+  check('تغییر روز ورود از صفر تا آفست همان روز است، نه صفر ساختگی', sameDayCell32?.dailyPnl === sameDayCell32?.netPnl);
+  const profile32 = holdingPeriodProfile(rolling32);
+  check('پروفایل افق نگهداری، چند ورود را در روز معاملاتی یکسان تجمیع می‌کند', profile32.rows.find((r) => r.holdingTradingDays === 1)?.samples === 2);
+  check('افق مقاوم فقط از افق دارای نمونه کافی انتخاب می‌شود', profile32.best?.holdingTradingDays === 1);
+  const detail32 = replayTradeDetail(matrixArgs32, 20260801, 20260802);
+  check('کلیک خانه می‌تواند مسیر کامل و بهترین/بدترین نقطه را بازسازی کند', detail32.ok && detail32.path.length === 2 && detail32.best && detail32.worst && detail32.selected.date === 20260802);
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

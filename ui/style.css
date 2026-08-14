@@ -365,9 +365,37 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-kpi.loss { border-top-color: var(--loss); }
 .history-chart-grid,
 .history-analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
-.history-chart { min-height: 220px; overflow: hidden; }
-.history-svg { display: block; width: 100%; min-width: 520px; height: auto; overflow: visible; }
-.history-svg text { fill: var(--muted); font-family: inherit; font-size: 10px; }
+.history-chart { min-height: 220px; min-width: 0; overflow: visible; }
+.history-svg { display: block; width: 100%; min-width: 0; height: auto; overflow: visible; }
+.history-svg text { fill: var(--muted); font-family: inherit; font-size: 10px; direction: ltr; unicode-bidi: isolate; }
+.history-svg .history-axis-title { fill: var(--ink-2); font-size: 11px; font-weight: 700; font-family: inherit; }
+.history-grid { stroke: color-mix(in srgb, var(--line) 75%, transparent); stroke-width: 1; }
+.history-grid-x { opacity: .55; }
+.history-axis { stroke: var(--line-strong, var(--line)); stroke-width: 1.2; }
+.history-line { stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+.history-chartbox { display: grid; gap: 7px; min-width: 0; }
+.history-chart-legend { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px; }
+.history-chart-legend button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2);
+  color: var(--ink-2); font: inherit; font-size: 10px; cursor: pointer;
+}
+.history-chart-legend button[aria-pressed="false"] { opacity: .48; text-decoration: line-through; }
+.history-chart-legend i, .history-tooltip i { width: 9px; height: 9px; border-radius: 50%; background: var(--series); flex: none; }
+.history-chart-stage { position: relative; min-width: 0; }
+.history-tooltip {
+  position: absolute; z-index: 5; width: max-content; max-width: 250px; display: grid; gap: 5px;
+  padding: 9px 11px; border: 1px solid var(--line-strong, var(--line)); border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: var(--shadow);
+  color: var(--ink-2); font-size: 10px; line-height: 1.55; pointer-events: none;
+}
+.history-tooltip[hidden] { display: none; }
+.history-tooltip b { color: var(--ink); }
+.history-tooltip span { display: flex; align-items: center; gap: 6px; }
+.history-tooltip strong.gain { color: var(--gain); }
+.history-tooltip strong.loss { color: var(--loss); }
+.history-cursor line { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; opacity: .72; }
+.history-cursor circle { stroke: var(--panel); stroke-width: 2; }
 .chart-zero { stroke: var(--line-strong, var(--line)); stroke-width: 1; stroke-dasharray: 4 4; }
 .scatter-gain { fill: color-mix(in srgb, var(--gain) 70%, transparent); }
 .scatter-loss { fill: color-mix(in srgb, var(--loss) 70%, transparent); }
@@ -402,12 +430,15 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   height: 220px; display: flex; direction: ltr; align-items: end; gap: 6px;
   padding: 24px 12px 34px; border-bottom: 1px solid var(--line); position: relative;
 }
-.hist-bin { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 4px; position: relative; }
+.hist-bin { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 4px; position: relative; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: help; }
+.hist-bin:hover, .hist-bin:focus-visible { background: color-mix(in srgb, var(--accent) 7%, transparent); outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 6px; }
 .hist-bin b { width: min(42px, 86%); min-height: 5px; border-radius: 5px 5px 1px 1px; background: var(--muted); }
 .hist-bin.gain b { background: var(--gain); }
 .hist-bin.loss b { background: var(--loss); }
 .hist-bin span { font-size: 10px; font-weight: 700; }
 .hist-bin small { position: absolute; top: calc(100% + 7px); color: var(--muted); font-size: 9px; white-space: nowrap; transform: rotate(-25deg); }
+.hist-y-title { position: absolute; inset-inline-start: 1px; top: 45%; transform: rotate(-90deg); color: var(--muted); font-size: 9px; }
+.hist-x-title { position: absolute; inset-inline-end: 8px; bottom: 2px; color: var(--muted); font-size: 9px; }
 .margin-summary { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 8px; padding: 10px; }
 .margin-summary div { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .margin-summary span { display: block; color: var(--muted); font-size: 10px; margin-bottom: 5px; }
@@ -427,6 +458,36 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .rolling-table th { position: sticky; top: 0; z-index: 2; padding: 5px; background: var(--panel-2); color: var(--muted); white-space: nowrap; }
 .rolling-table tbody th { right: 0; z-index: 1; }
 .rolling-table td { min-width: 48px; height: 28px; padding: 2px; text-align: center; color: var(--ink); }
+.return-matrix td { padding: 0; }
+.return-matrix td button { width: 100%; min-width: 58px; height: 30px; padding: 2px 4px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 9px; cursor: pointer; }
+.return-matrix td button:hover, .return-matrix td button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; background: color-mix(in srgb, var(--panel) 25%, transparent); }
+.return-matrix .matrix-empty { background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--line) 38%, transparent) 5px 6px); }
+.matrix-mode { display: flex; flex-wrap: wrap; gap: 6px; }
+.matrix-mode button[aria-pressed="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }
+.trade-detail { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
+.trade-detail[hidden] { display: none; }
+.trade-detail-kpis { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.trade-detail-kpis > div { min-height: 68px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.trade-detail-kpis span { display: block; color: var(--muted); font-size: 10px; margin-bottom: 6px; }
+.trade-detail-kpis b { font-size: 11px; line-height: 1.7; }
+.holding-head { margin-top: 18px; }
+.holding-best { display: grid; gap: 4px; padding: 11px 13px; background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border-bottom: 1px solid var(--line); }
+.holding-best span, .holding-best small { color: var(--muted); font-size: 10px; }
+.holding-best b { color: var(--accent); }
+.holding-picked { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.history-payoff-card { margin: 14px 0; }
+.payoff-day-controls { display: grid; grid-template-columns: minmax(220px, 1fr) auto; align-items: end; gap: 16px; margin: 13px 0; }
+.payoff-day-controls > label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.payoff-day-controls input[type="range"] { width: 100%; accent-color: var(--accent); }
+.payoff-layer-controls { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.payoff-layer-controls label { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 10px; cursor: pointer; }
+.payoff-layer-controls input { accent-color: var(--accent); }
+.history-payoff-shell { border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+.history-payoff-shell .chart-box { border: 0; border-radius: 0; }
+.payoff-decision-strip { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.payoff-decision-strip > div { min-height: 58px; padding: 9px 11px; background: var(--panel-2); }
+.payoff-decision-strip span { display: block; color: var(--muted); font-size: 9px; margin-bottom: 5px; }
+.payoff-decision-strip b { font-size: 10px; line-height: 1.55; }
 .empty-note { color: var(--muted); text-align: center; padding: 28px 12px; }
 
 @media (max-width: 1100px) {
@@ -434,6 +495,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .history-liquidity-controls { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
   .history-liquidity-controls > div { grid-column: 1 / -1; }
   .history-kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+  .trade-detail-kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+  .payoff-decision-strip { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 }
 @media (max-width: 760px) {
   .history-hero { display: block; }
@@ -447,7 +510,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .history-liquidity-controls > div { grid-column: auto; }
   .range-head { align-items: flex-start; flex-direction: column; }
   .history-kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
-  .history-svg { min-width: 480px; }
+  .trade-detail-kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+  .payoff-day-controls { grid-template-columns: 1fr; }
 }
 
 .empty { max-width: 460px; margin: 12vh auto; text-align: center; color: var(--muted); }
@@ -643,6 +707,8 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .payoff .strike { stroke: var(--accent-2); stroke-width: 1; stroke-dasharray: 2 4; }
 .payoff .be { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
 .payoff .spot { stroke: var(--warn); stroke-width: 1.5; }
+.payoff .spot-pnl { fill: var(--warn); stroke: var(--panel); stroke-width: 2.5; }
+.payoff text.axis-title { fill: var(--ink-2); font-size: 11px; font-weight: 700; }
 .payoff path.curve-today { fill: none; stroke: var(--accent-2); stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
 .curve2-legend line.curve-today { stroke: var(--accent-2); stroke-width: 1.75; stroke-dasharray: 5 4; }
 .curve2-legend line.curve { stroke: var(--accent); stroke-width: 2.5; }
